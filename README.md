@@ -27,13 +27,14 @@ The Gradle wrapper is included. The first build downloads its dependencies. Runt
 
 ## Your day
 
-- **Today** always has P0, P1, P2, and Events sections. Choose a date from the week strip or calendar to view or plan another day.
+- **Today** always has P0, P1, P2, and Events sections, with a compact preview of the next event. Tap the date to open the calendar, or use Journal to revisit another day. The top + button adds a task or event without covering the list.
 - **P0 / Must do:** unfinished items automatically carry over at local midnight. Missed days are reconciled when the app runs again, with a separate historical snapshot for each day.
-- **P1 / Nice to do** and **P2 / If there's room:** older open items wait in “A fresh look.” Expand it, select individual items or select all, then choose **Move to today** or **Keep in history**. Unreviewed items remain available on later days. Kept items can still be moved from their original day.
+- **P1 / Nice to do** and **P2 / If there's room:** older open items wait in “Review carry-over” below P0. Expand it, select individual items or select all, then choose **Move to today** or **Keep in history**. Unreviewed items remain available on later days. Kept items can still be moved from their original day.
 - Tap a task to edit its title, switch freely between priorities, or change its status. The current priority controls subsequent carry-over. Changing a past open item to P0 immediately reconciles it through today.
+- Task and event edits survive screen rotation. Closing an unsaved change offers **Keep editing** or **Discard**; failed saves keep the form open with an error.
 - **Done** and **Stale** stay in history and do not carry over. Stale means no longer needed. Either can be reopened.
 - Carried snapshots show where the item went and are read-only. Deleting a task permanently removes that day's entry; other historical snapshots remain.
-- **Journal** lists recorded task days and the last two weeks, including quiet days. The calendar can open any other date.
+- **Journal** lists recorded task days and the last two weeks, including quiet days and open-task counts. Historical event labels use actual dates. The calendar can open any other date.
 
 ## Events and reminders
 
@@ -59,6 +60,6 @@ Native Kotlin + Jetpack Compose, with Android platform SQLite and AlarmManager. 
 
 ## Verification
 
-Unit tests exercise recurrence anchors, leap years, DST reminder leads, missed-day P0 snapshots, idempotence, optional carry-over, priority changes, stale/done behavior, persistence, and reminder invalidation. Android lint and a debug APK build run in CI.
+Tests exercise recurrence anchors, leap years, DST reminder leads, missed-day P0 snapshots, idempotence, optional carry-over, priority changes, stale/done behavior, persistence, reminder invalidation, task/event editing across activity recreation, and unsaved-change protection. Android lint and a debug APK build run in CI.
 
 For device acceptance: create a task in each priority; switch P1 ↔ P2; mark tasks done/stale; cross midnight or leave several days; review optional tasks individually and in bulk; navigate old dates; create/edit/delete one-time and recurring events; grant and deny both reminder permissions; verify both reminder offsets and scheduling after reboot/time-zone changes.

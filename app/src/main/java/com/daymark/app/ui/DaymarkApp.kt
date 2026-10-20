@@ -47,10 +47,13 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
     val state by model.state.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(if (openEvents) "Events" else "Today") }
     var taskOpen by rememberSaveable { mutableStateOf(false) }
-    var editingTask by remember { mutableStateOf<Task?>(null) }
-    var initialPriority by remember { mutableStateOf(Priority.P0) }
+    var editingTaskId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var taskDay by rememberSaveable { mutableStateOf(state.selected.toString()) }
+    var initialPriority by rememberSaveable { mutableStateOf(Priority.P0) }
     var eventOpen by rememberSaveable { mutableStateOf(false) }
-    var editingEvent by remember { mutableStateOf<Event?>(null) }
+    var editingEventId by rememberSaveable { mutableStateOf<Long?>(null) }
+    val editingTask = state.allTasks.find { it.id == editingTaskId }
+    val editingEvent = state.events.find { it.id == editingEventId }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var dateOpen by rememberSaveable { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
@@ -60,10 +63,10 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
         if (Build.VERSION.SDK_INT >= 33 && !state.notificationsAllowed) notificationRequest.launch(Manifest.permission.POST_NOTIFICATIONS)
         else context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName))
     }
-    val editTask: (Task) -> Unit = { editingTask = it; initialPriority = it.priority; taskOpen = true }
-    val newTask: (Priority) -> Unit = { editingTask = null; initialPriority = it; taskOpen = true }
-    val editEvent: (Event) -> Unit = { editingEvent = it; eventOpen = true }
-    val newEvent: () -> Unit = { editingEvent = null; eventOpen = true }
+    val editTask: (Task) -> Unit = { model.clearEditorResult(); editingTaskId = it.id; initialPriority = it.priority; taskDay = it.day.toString(); taskOpen = true }
+    val newTask: (Priority) -> Unit = { model.clearEditorResult(); editingTaskId = null; initialPriority = it; taskDay = state.selected.toString(); taskOpen = true }
+    val editEvent: (Event) -> Unit = { model.clearEditorResult(); editingEventId = it.id; eventOpen = true }
+    val newEvent: () -> Unit = { model.clearEditorResult(); editingEventId = null; eventOpen = true }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -74,6 +77,15 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
         }
     }
     LaunchedEffect(state.error) { state.error?.let { snackbar.showSnackbar(it); model.clearError() } }
+    LaunchedEffect(state.editorSaved) {
+        if (state.editorSaved) {
+            val savedEvent = eventOpen
+            taskOpen = false
+            eventOpen = false
+            model.clearEditorResult()
+            if (savedEvent && Build.VERSION.SDK_INT >= 33 && !state.notificationsAllowed) notificationRequest.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
 
     Scaffold(
         containerColor = Paper,
@@ -91,14 +103,6 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
                 }
             }
         },
-        floatingActionButton = {
-            if (tab != "Journal") ExtendedFloatingActionButton(
-                modifier = Modifier.semantics { contentDescription = if (tab == "Events") "New event" else "New task" },
-                onClick = { if (tab == "Events") newEvent() else newTask(Priority.P0) },
-                containerColor = Forest, contentColor = Color.White, shape = RoundedCornerShape(19.dp),
-                icon = { Icon(painterResource(R.drawable.ic_add), null) }, text = { Text(if (tab == "Events") "New event" else "New task") },
-            )
-        },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -106,6 +110,11 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
                     Box(Modifier.size(9.dp).background(Forest, CircleShape))
                     Text("DAYMARK", style = MaterialTheme.typography.labelSmall, color = Forest, letterSpacing = 2.5.sp)
                 }
+                if (tab != "Journal") FilledIconButton(
+                    onClick = { if (tab == "Events") newEvent() else newTask(Priority.P0) },
+                    modifier = Modifier.size(48.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = Forest, contentColor = Color.White),
+                ) { Icon(painterResource(R.drawable.ic_add), if (tab == "Events") "New event" else "New task") }
                 IconButton(onClick = { settingsOpen = true }) { Icon(painterResource(R.drawable.ic_notifications_none), "Reminder settings", tint = Forest) }
             }
             when {
@@ -117,24 +126,27 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
         }
     }
 
-    if (taskOpen) TaskEditor(editingTask, initialPriority, state.selected,
+    // Wait for SQLite after process restoration; a missing ID must never become a new item.
+    val missingItem = !state.loading && !state.editorSaved &&
+        ((taskOpen && editingTaskId != null && editingTask == null) || (eventOpen && editingEventId != null && editingEvent == null))
+    if (missingItem) AlertDialog(onDismissRequest = { taskOpen = false; eventOpen = false },
+        title = { Text("Entry unavailable") }, text = { Text("This entry is no longer available. Your other entries are safe.") },
+        confirmButton = { TextButton(onClick = { taskOpen = false; eventOpen = false }) { Text("Close") } })
+    if (taskOpen && !state.loading && !missingItem && !state.editorSaved) TaskEditor(editingTask, initialPriority, LocalDate.parse(taskDay),
         onDismiss = { taskOpen = false },
         onSave = { title, priority, status ->
-            editingTask?.let { model.updateTask(it.copy(title = title, priority = priority, status = status)) }
-                ?: model.addTask(title, priority, state.selected)
-            taskOpen = false
+            editingTask?.let { model.updateTask(it.copy(title = title, priority = priority, status = status), fromEditor = true) }
+                ?: model.addTask(title, priority, LocalDate.parse(taskDay))
         },
-        onDelete = { editingTask?.let { model.deleteTask(it.id) }; taskOpen = false },
-        onCarry = { title, priority, status -> editingTask?.let { model.saveAndCarry(it.copy(title = title, priority = priority, status = status)) }; taskOpen = false }, today = state.today,
+        onDelete = { editingTask?.let { model.deleteTask(it.id) } },
+        onCarry = { title, priority, status -> editingTask?.let { model.saveAndCarry(it.copy(title = title, priority = priority, status = status)) } }, today = state.today,
+        saving = state.editorSaving, error = state.editorError,
     )
-    if (eventOpen) EventEditor(editingEvent, onDismiss = { eventOpen = false },
-        onSave = {
-            model.saveEvent(it); eventOpen = false
-            if (Build.VERSION.SDK_INT >= 33 && !state.notificationsAllowed) notificationRequest.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }, onDelete = { editingEvent?.let { model.deleteEvent(it.id) }; eventOpen = false })
+    if (eventOpen && !state.loading && !missingItem && !state.editorSaved) EventEditor(editingEvent, onDismiss = { eventOpen = false },
+        onSave = model::saveEvent, onDelete = { editingEvent?.let { model.deleteEvent(it.id) } }, saving = state.editorSaving, error = state.editorError)
     if (dateOpen) CalendarDialog(state.selected, { dateOpen = false }) { model.select(it); dateOpen = false }
     if (settingsOpen) ModalBottomSheet(onDismissRequest = { settingsOpen = false }, containerColor = Paper) {
-        Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).padding(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("A little heads-up.", style = MaterialTheme.typography.headlineMedium)
             Text("Every event gets two reminders: 24 hours before and 30 minutes before. Times follow your phone's local time zone.", color = Muted)
             SettingRow("Notifications", if (state.notificationsAllowed) "Enabled" else "Allow Daymark to notify you", state.notificationsAllowed)
@@ -171,34 +183,33 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
     val heading = when (selected) { state.today -> "Today, gently."; state.today.plusDays(1) -> "Tomorrow."; else -> selected.label("MMMM d.") }
     val p0 = state.tasks.filter { it.priority == Priority.P0 && it.status != TaskStatus.MOVED && it.status != TaskStatus.STALE }
     val done = p0.count { it.status == TaskStatus.DONE }
-    LazyColumn(modifier = Modifier.testTag("day-list"), contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 104.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+    val occurrences = state.events.flatMap { listOfNotNull(EventRules.onDay(it, selected), EventRules.onDay(it, selected.plusDays(1))) }.sortedBy { it.at }
+    val nextEvent = occurrences.firstOrNull { !isToday || it.at >= LocalDateTime.now() }
+    LazyColumn(modifier = Modifier.testTag("day-list"), contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Column {
                 Text(heading, style = MaterialTheme.typography.displaySmall)
-                Spacer(Modifier.height(6.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(selected.label("EEEE, MMMM d"), color = Muted, modifier = Modifier.weight(1f))
-                    IconButton(onClick = openCalendar, modifier = Modifier.size(48.dp)) { Icon(painterResource(R.drawable.ic_calendar_month), "Choose date", tint = Forest) }
+                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(onClickLabel = "Choose date", onClick = openCalendar), verticalAlignment = Alignment.CenterVertically) {
+                    Text(selected.label(if (isToday) "EEEE, MMMM d" else "EEEE, MMMM d, yyyy"), color = Muted, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    Icon(painterResource(R.drawable.ic_calendar_month), "Choose date", tint = Forest)
                 }
                 if (!isToday) TextButton(onClick = { model.select(state.today) }, contentPadding = PaddingValues(0.dp)) { Text("Back to today") }
             }
         }
-        item { WeekStrip(selected, state.today, model::select) }
         item {
-            Surface(color = Color(0xFFE9EDE3), shape = RoundedCornerShape(20.dp)) {
-                Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(if (p0.isEmpty()) "A little intention goes a long way." else if (done == p0.size) "The essentials are taken care of." else "Make room for what matters.", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, color = Forest)
-                        if (p0.isNotEmpty()) Text("$done / ${p0.size}", color = Forest, style = MaterialTheme.typography.labelLarge)
-                    }
-                    if (p0.isNotEmpty()) LinearProgressIndicator(progress = { done.toFloat() / p0.size }, modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape), color = Forest, trackColor = Color(0xFFD3DDCA), drawStopIndicator = {})
-                    Text(if (p0.isEmpty()) "Choose your must-dos. Leave the rest some breathing room." else "${p0.size - done} must-do${if (p0.size - done == 1) "" else "s"} left · everything else is a bonus", color = Forest, style = MaterialTheme.typography.bodyMedium)
-                }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(if (p0.isEmpty()) "Choose your must-dos." else "P0 · $done / ${p0.size} complete", color = Forest, style = MaterialTheme.typography.bodyMedium)
+                if (p0.isNotEmpty()) LinearProgressIndicator(progress = { done.toFloat() / p0.size }, modifier = Modifier.weight(1f).height(4.dp).clip(CircleShape), color = Forest, trackColor = Color(0xFFD3DDCA), drawStopIndicator = {})
             }
         }
-        if (isToday && state.pending.isNotEmpty()) item {
-            PendingReview(state.pending, editTask, model::carry, model::dismiss)
-        }
+        nextEvent?.let { occurrence -> item {
+            Surface(onClick = { editEvent(occurrence.event) }, color = Color(0xFFE9EDE3), shape = RoundedCornerShape(12.dp)) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("${if (isToday) { if (occurrence.at.toLocalDate() == selected) "Today" else "Tomorrow" } else occurrence.at.label("MMM d, yyyy")} · ${occurrence.at.label("HH:mm")}", color = Forest, style = MaterialTheme.typography.labelLarge)
+                    Text(occurrence.event.title, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                }
+            }
+        } }
         Priority.entries.forEach { priority ->
             val tasks = state.tasks.filter { it.priority == priority }
             item(key = priority.name) {
@@ -219,35 +230,18 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
                     HorizontalDivider(color = Line)
                 }
             }
+            if (priority == Priority.P0 && isToday && state.pending.isNotEmpty()) item(key = "carry-review") {
+                PendingReview(state.pending, editTask, model::carry, model::dismiss)
+            }
         }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                SectionTitle("Events", "TODAY & TOMORROW", R.drawable.ic_event, newEvent)
-                val occurrences = state.events.flatMap { listOfNotNull(EventRules.onDay(it, selected), EventRules.onDay(it, selected.plusDays(1))) }.sortedBy { it.at }
+                SectionTitle("Events", if (isToday) "TODAY & TOMORROW" else "${selected.label("MMM d")} & ${selected.plusDays(1).label("MMM d, yyyy")}", R.drawable.ic_event, newEvent)
                 if (occurrences.isEmpty()) Text("A little breathing room. No events scheduled.", color = Muted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(vertical = 8.dp))
-                occurrences.forEach { EventCard(it.event, it.at, if (it.at.toLocalDate() == selected) "Today" else "Tomorrow", { editEvent(it.event) }) }
+                occurrences.forEach { EventCard(it.event, it.at, if (isToday) { if (it.at.toLocalDate() == selected) "Today" else "Tomorrow" } else it.at.label("MMM d, yyyy"), { editEvent(it.event) }) }
             }
         }
         item { Text("ONE DAY AT A TIME.", color = Muted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) }
-    }
-}
-
-@Composable private fun WeekStrip(selected: LocalDate, today: LocalDate, choose: (LocalDate) -> Unit) {
-    val monday = selected.minusDays((selected.dayOfWeek.value - 1).toLong())
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-        (0L..6L).forEach { index ->
-            val day = monday.plusDays(index)
-            val active = day == selected
-            Column(Modifier.weight(1f).clip(RoundedCornerShape(15.dp)).background(if (active) Forest else Color.Transparent)
-                .clickable { choose(day) }.padding(vertical = 12.dp)
-                .semantics(mergeDescendants = true) { contentDescription = day.label("EEEE, MMMM d, yyyy"); this.selected = active }, horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(day.label("EEEEE"), color = if (active) Color.White.copy(alpha = .7f) else Muted, style = MaterialTheme.typography.labelMedium)
-                Spacer(Modifier.height(8.dp))
-                Text(day.dayOfMonth.toString(), color = if (active) Color.White else Ink, style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(6.dp))
-                Box(Modifier.size(4.dp).background(if (day == today) { if (active) Color(0xFFDCC58C) else Forest } else Color.Transparent, CircleShape))
-            }
-        }
     }
 }
 
@@ -256,7 +250,7 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = edit).padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
         if (terminal) Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
             Icon(painterResource(if (task.status == TaskStatus.STALE) R.drawable.ic_remove_circle_outline else R.drawable.ic_arrow_forward), null, tint = Muted, modifier = Modifier.size(21.dp))
-        } else Checkbox(checked = task.status == TaskStatus.DONE, onCheckedChange = { toggle() }, colors = CheckboxDefaults.colors(checkedColor = Forest, uncheckedColor = Color(0xFF90988A)), modifier = Modifier.semantics { contentDescription = "Complete ${task.title}" })
+        } else Checkbox(checked = task.status == TaskStatus.DONE, onCheckedChange = { toggle() }, colors = CheckboxDefaults.colors(checkedColor = Forest, uncheckedColor = Muted), modifier = Modifier.semantics { contentDescription = task.title; stateDescription = if (task.status == TaskStatus.DONE) "Completed" else "Not completed" })
         Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
             Text(task.title, color = if (task.status == TaskStatus.OPEN) Ink else Muted,
                 textDecoration = if (task.status == TaskStatus.DONE || task.status == TaskStatus.STALE) TextDecoration.LineThrough else null,
@@ -269,7 +263,7 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
             }
             detail?.let { Text(it, color = Muted, style = MaterialTheme.typography.labelMedium) }
         }
-        Icon(painterResource(R.drawable.ic_more_horiz), "Edit ${task.title}", tint = Muted, modifier = Modifier.padding(12.dp).size(20.dp))
+        Icon(painterResource(R.drawable.ic_more_horiz), null, tint = Muted, modifier = Modifier.padding(12.dp).size(20.dp))
     }
 }
 
@@ -280,13 +274,11 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
     val selected = selection.intersect(ids)
     Surface(color = Color(0xFFF0EADF), shape = RoundedCornerShape(20.dp), modifier = Modifier.animateContentSize()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(Modifier.fillMaxWidth().clickable { expanded = !expanded }, verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(onClickLabel = if (expanded) "Collapse carry-over review" else "Review carry-over tasks") { expanded = !expanded }
+                .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" }, verticalAlignment = Alignment.CenterVertically) {
                 Icon(painterResource(R.drawable.ic_history), null, tint = Olive, modifier = Modifier.padding(end = 12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("A fresh look", style = MaterialTheme.typography.titleMedium)
-                    Text("${tasks.size} optional task${if (tasks.size == 1) "" else "s"} from earlier days", style = MaterialTheme.typography.bodyMedium, color = Muted)
-                }
-                IconButton(onClick = { expanded = !expanded }) { Icon(painterResource(if (expanded) R.drawable.ic_expand_less else R.drawable.ic_expand_more), if (expanded) "Collapse carry-over review" else "Review carry-over tasks") }
+                Text("Review carry-over (${tasks.size})", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                Icon(painterResource(if (expanded) R.drawable.ic_expand_less else R.drawable.ic_expand_more), null)
             }
             if (expanded) {
                 Text("Bring what still matters into today.", color = Muted, style = MaterialTheme.typography.bodyMedium)
@@ -318,17 +310,16 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
 
 @Composable private fun EventCard(event: Event, at: LocalDateTime, dayLabel: String, edit: () -> Unit) {
     Surface(onClick = edit, color = Color(0xFFFDFCFA), shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, Line)) {
-        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.width(58.dp)) {
-                Text(at.label("HH:mm"), style = MaterialTheme.typography.titleMedium, color = Forest)
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(at.label("HH:mm"), style = MaterialTheme.typography.titleMedium, color = Forest, softWrap = false)
                 Text(dayLabel, style = MaterialTheme.typography.labelMedium, color = Muted)
             }
-            Box(Modifier.width(2.dp).height(36.dp).background(Color(0xFFD4DCCB), CircleShape))
-            Column(Modifier.padding(start = 14.dp).weight(1f)) {
-                Text(event.title, style = MaterialTheme.typography.titleMedium)
-                Text(if (event.repeat == Repeat.ONCE) at.label("EEE, MMM d") else event.repeat.label, color = Muted, style = MaterialTheme.typography.bodyMedium)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(event.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                if (event.repeat != Repeat.ONCE) Icon(painterResource(R.drawable.ic_repeat), "Repeating event", tint = Muted, modifier = Modifier.size(18.dp))
             }
-            if (event.repeat != Repeat.ONCE) Icon(painterResource(R.drawable.ic_repeat), "Repeating event", tint = Muted, modifier = Modifier.size(18.dp))
+            Text(if (event.repeat == Repeat.ONCE) at.label("EEE, MMM d, yyyy") else event.repeat.label, color = Muted, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
@@ -337,7 +328,7 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
     val now = LocalDateTime.now()
     val upcoming = state.events.mapNotNull { event -> EventRules.next(event, now)?.let { Occurrence(event, it) } }.sortedBy { it.at }
     val past = state.events.filter { it.repeat == Repeat.ONCE && it.start < now }.sortedByDescending { it.start }
-    LazyColumn(contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 104.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    LazyColumn(contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { Column { Text("On the horizon.", style = MaterialTheme.typography.displaySmall); Spacer(Modifier.height(8.dp)); Text("Dates worth keeping close.", color = Muted) } }
         item {
             Surface(onClick = settings, color = Color(0xFFE9EDE3), shape = RoundedCornerShape(18.dp)) {
@@ -367,6 +358,12 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
             val tasks = state.allTasks.filter { it.day == day }
             val done = tasks.count { it.status == TaskStatus.DONE }
             val moved = tasks.count { it.status == TaskStatus.MOVED }
+            val open = tasks.count { it.status == TaskStatus.OPEN }
+            val stale = tasks.count { it.status == TaskStatus.STALE }
+            val summary = listOfNotNull(
+                "$open open".takeIf { open > 0 }, "$done completed".takeIf { done > 0 },
+                "$moved carried".takeIf { moved > 0 }, "$stale stale".takeIf { stale > 0 },
+            ).joinToString(" · ")
             Surface(onClick = { choose(day) }, shape = RoundedCornerShape(18.dp), color = if (day == state.today) Color(0xFFE9EDE3) else Color(0xFFFDFCFA), border = BorderStroke(1.dp, Line)) {
                 Row(Modifier.fillMaxWidth().padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.width(50.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -375,7 +372,7 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
                     }
                     Column(Modifier.weight(1f).padding(start = 16.dp)) {
                         Text(if (day == state.today) "Today" else day.label("EEEE, yyyy"), style = MaterialTheme.typography.titleMedium)
-                        Text(if (tasks.isEmpty()) "A quiet page" else "$done completed · $moved carried · ${tasks.count { it.status == TaskStatus.STALE }} stale", color = Muted, style = MaterialTheme.typography.bodyMedium)
+                        Text(if (tasks.isEmpty()) "A quiet page" else summary, color = Muted, style = MaterialTheme.typography.bodyMedium)
                     }
                     Icon(painterResource(R.drawable.ic_keyboard_arrow_right), "Open ${day.label("MMMM d")}", tint = Muted)
                 }

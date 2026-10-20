@@ -11,7 +11,7 @@ import com.daymark.app.domain.Priority
 
 val Paper = Color(0xFFF6F4EF)
 val Ink = Color(0xFF252D28)
-val Muted = Color(0xFF686F65)
+val Muted = Color(0xFF62695F)
 val Forest = Color(0xFF315C49)
 val Line = Color(0xFFE2E4DA)
 val Clay = Color(0xFFA54D39)
@@ -27,10 +27,11 @@ fun Priority.color() = when (this) { Priority.P0 -> Clay; Priority.P1 -> Olive; 
             tertiary = Slate, tertiaryContainer = Color(0xFFE3EAF0), onTertiaryContainer = Slate,
             background = Paper, onBackground = Ink,
             surface = Paper, onSurface = Ink, surfaceVariant = Color(0xFFEEEFE7), onSurfaceVariant = Muted,
+            surfaceContainerHigh = Color(0xFFE9EDE3),
             outline = Color(0xFF848B80), outlineVariant = Line, error = Clay,
         ),
         typography = Typography(
-            displaySmall = TextStyle(fontFamily = FontFamily.Serif, fontSize = 42.sp, lineHeight = 48.sp, letterSpacing = (-1).sp),
+            displaySmall = TextStyle(fontFamily = FontFamily.Serif, fontSize = 32.sp, lineHeight = 38.sp, letterSpacing = (-0.5).sp),
             headlineMedium = TextStyle(fontFamily = FontFamily.Serif, fontSize = 30.sp, lineHeight = 36.sp),
             titleLarge = TextStyle(fontFamily = FontFamily.Serif, fontSize = 23.sp, lineHeight = 29.sp),
             titleMedium = TextStyle(fontSize = 16.sp, lineHeight = 23.sp, fontWeight = FontWeight.Medium),
