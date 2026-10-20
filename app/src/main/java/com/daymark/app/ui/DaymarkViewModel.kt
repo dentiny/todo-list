@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.daymark.app.daymark
 import com.daymark.app.domain.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -26,6 +27,9 @@ data class DaymarkState(
     val exactAllowed: Boolean = false,
     val loading: Boolean = true,
     val error: String? = null,
+    val editorSaving: Boolean = false,
+    val editorSaved: Boolean = false,
+    val editorError: String? = null,
 )
 
 class DaymarkViewModel(application: Application) : AndroidViewModel(application) {
@@ -36,7 +40,11 @@ class DaymarkViewModel(application: Application) : AndroidViewModel(application)
 
     init { refresh(true) }
 
-    private fun runOperation(block: () -> Unit = {}) {
+    private fun runOperation(editor: Boolean = false, block: () -> Unit = {}) {
+        if (editor) {
+            if (mutable.value.editorSaving) return
+            mutable.update { it.copy(editorSaving = true, editorSaved = false, editorError = null) }
+        }
         viewModelScope.launch {
             mutex.withLock {
                 try {
@@ -50,11 +58,18 @@ class DaymarkViewModel(application: Application) : AndroidViewModel(application)
                             today = today, selected = selected, tasks = app.store.tasks(selected),
                             allTasks = app.store.allTasks(), pending = app.store.pending(today), events = app.store.events(),
                             notificationsAllowed = app.scheduler.notificationsAllowed, exactAllowed = app.scheduler.exactAllowed,
-                            loading = false,
+                            loading = false, editorSaving = if (editor) false else old.editorSaving,
+                            editorSaved = editor || old.editorSaved,
                         )
                     }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
                 } catch (_: Exception) {
-                    mutable.update { it.copy(loading = false, error = "Couldn't save your changes. Please try again.") }
+                    val message = "Couldn't save your changes. Please try again."
+                    mutable.update {
+                        if (editor) it.copy(loading = false, editorSaving = false, editorError = message)
+                        else it.copy(loading = false, error = message)
+                    }
                 }
             }
         }
@@ -62,17 +77,18 @@ class DaymarkViewModel(application: Application) : AndroidViewModel(application)
 
     fun refresh(reschedule: Boolean = false) = runOperation { if (reschedule) app.scheduler.refresh() }
     fun select(day: LocalDate) = runOperation { mutable.update { it.copy(selected = day) } }
-    fun addTask(title: String, priority: Priority, day: LocalDate) = runOperation { app.store.addTask(title, priority, day) }
-    fun updateTask(task: Task) = runOperation { app.store.updateTask(task, LocalDate.now()) }
-    fun deleteTask(id: Long) = runOperation { app.store.deleteTask(id) }
+    fun addTask(title: String, priority: Priority, day: LocalDate) = runOperation(editor = true) { app.store.addTask(title, priority, day) }
+    fun updateTask(task: Task, fromEditor: Boolean = false) = runOperation(editor = fromEditor) { app.store.updateTask(task, LocalDate.now()) }
+    fun deleteTask(id: Long) = runOperation(editor = true) { app.store.deleteTask(id) }
     fun carry(ids: Set<Long>) = runOperation { app.store.carry(ids, LocalDate.now()) }
-    fun saveAndCarry(task: Task) = runOperation {
+    fun saveAndCarry(task: Task) = runOperation(editor = true) {
         val today = LocalDate.now()
         app.store.updateTask(task, today)
         app.store.carry(setOf(task.id), today)
     }
     fun dismiss(ids: Set<Long>) = runOperation { app.store.dismiss(ids) }
-    fun saveEvent(event: Event) = runOperation { app.scheduler.save(event) }
-    fun deleteEvent(id: Long) = runOperation { app.scheduler.delete(id) }
+    fun saveEvent(event: Event) = runOperation(editor = true) { app.scheduler.save(event) }
+    fun deleteEvent(id: Long) = runOperation(editor = true) { app.scheduler.delete(id) }
+    fun clearEditorResult() { mutable.update { it.copy(editorSaved = false, editorError = null) } }
     fun clearError() { mutable.update { it.copy(error = null) } }
 }

@@ -2,6 +2,12 @@ package com.daymark.app
 
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.lifecycle.ViewModelProvider
+import com.daymark.app.ui.DaymarkViewModel
+import com.daymark.app.domain.*
+import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -15,6 +21,12 @@ import org.robolectric.annotation.LooperMode
 class AppInteractionTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
+    // Robolectric may reuse AndroidViewModelFactory's Application across test activities.
+    // Read the same store as the UI rather than a different activity Application's store.
+    private fun uiApp() = compose.runOnIdle {
+        ViewModelProvider(compose.activity)[DaymarkViewModel::class.java].getApplication<DaymarkApplication>().daymark
+    }
+
     @Test fun `create a task complete it and change its priority`() {
         compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("New task").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithContentDescription("New task").performClick()
@@ -23,9 +35,9 @@ class AppInteractionTest {
         compose.onNodeWithText("Add task").performScrollTo().assertIsEnabled().performClick()
         compose.waitUntil(10_000) { compose.onAllNodesWithText("Prepare for the exam", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag("day-list").performScrollToNode(hasText("Prepare for the exam"))
-        compose.onNodeWithContentDescription("Complete Prepare for the exam", useUnmergedTree = true).performClick()
-        compose.waitUntil(10_000) { compose.onAllNodes(isOn() and hasContentDescription("Complete Prepare for the exam"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithContentDescription("Complete Prepare for the exam", useUnmergedTree = true).assertIsOn()
+        compose.onNode(isToggleable() and hasContentDescription("Prepare for the exam"), useUnmergedTree = true).performClick()
+        compose.waitUntil(10_000) { compose.onAllNodes(isOn() and hasContentDescription("Prepare for the exam"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNode(isToggleable() and hasContentDescription("Prepare for the exam"), useUnmergedTree = true).assertIsOn()
         compose.onNodeWithText("Prepare for the exam").performClick()
         compose.onNode(hasText("P2") and hasClickAction()).performScrollTo().performClick().assertIsSelected()
         compose.onNodeWithText("Save changes").performScrollTo().performClick()
@@ -35,7 +47,7 @@ class AppInteractionTest {
     }
 
     @Test fun `event editor exposes yearly recurrence and requires a title`() {
-        compose.onNodeWithText("Events").performClick()
+        compose.onNode(hasText("Events") and hasClickAction()).performClick()
         compose.onNodeWithText("On the horizon.").assertIsDisplayed()
         compose.onNodeWithContentDescription("New event").performClick()
         compose.onNodeWithText("Something to remember.").assertIsDisplayed()
@@ -49,5 +61,68 @@ class AppInteractionTest {
         compose.onNodeWithText("Days, collected.").assertIsDisplayed()
         compose.onAllNodesWithText("A quiet page")[1].performClick()
         compose.onNodeWithText("Back to today").assertExists()
+    }
+
+    @Test fun `task edit survives recreation and updates the original row`() {
+        val store = uiApp().store
+        compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("New task").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithContentDescription("New task").performClick()
+        compose.onNode(hasSetTextAction() and hasText("Task")).performTextInput("Rotation task")
+        compose.onNode(hasText("P1") and hasClickAction()).performScrollTo().performClick()
+        compose.onNodeWithText("Add task").performScrollTo().performClick()
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("A little intention.").fetchSemanticsNodes().isEmpty() }
+        val original = compose.runOnIdle { store.allTasks().single() }
+        compose.onNodeWithTag("day-list").performScrollToNode(hasText("Rotation task"))
+        compose.onNodeWithText("Rotation task").performClick()
+        compose.onNode(hasSetTextAction() and hasText("Task")).performTextReplacement("Edited after rotation")
+        compose.activityRule.scenario.recreate()
+        compose.onNodeWithText("Make it yours.").assertExists()
+        compose.onNode(hasSetTextAction() and hasText("Task")).assertTextContains("Edited after rotation")
+        compose.onNodeWithText("Save changes").performScrollTo().performClick()
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("Make it yours.").fetchSemanticsNodes().isEmpty() }
+        val saved = compose.runOnIdle { store.allTasks().single() }
+        assertEquals(original.id, saved.id)
+        assertEquals("Edited after rotation", saved.title)
+        assertEquals(Priority.P1, saved.priority)
+    }
+
+    @Test fun `event edit survives recreation without creating a duplicate`() {
+        val app = uiApp()
+        compose.onNode(hasText("Events") and hasClickAction()).performClick()
+        compose.onNodeWithContentDescription("New event").performClick()
+        compose.onNode(hasSetTextAction() and hasText("Event name")).performTextInput("Rotation birthday")
+        compose.onNodeWithText("Yearly").performScrollTo().performClick()
+        compose.onNodeWithText("Add event").performScrollTo().performClick()
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("Something to remember.").fetchSemanticsNodes().isEmpty() }
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("Rotation birthday").fetchSemanticsNodes().isNotEmpty() }
+        val original = compose.runOnIdle { app.store.events().single() }
+        compose.onNodeWithText("Rotation birthday").performClick()
+        compose.onNode(hasSetTextAction() and hasText("Event name")).performTextReplacement("Birthday updated")
+        compose.activityRule.scenario.recreate()
+        compose.onNodeWithText("Keep it close.").assertExists()
+        compose.onNode(hasSetTextAction() and hasText("Event name")).assertTextContains("Birthday updated")
+        compose.onNodeWithText("Save changes").performScrollTo().performClick()
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("Keep it close.").fetchSemanticsNodes().isEmpty() }
+        val saved = compose.runOnIdle { app.store.events().single() }
+        assertEquals(original.id, saved.id)
+        assertEquals("Birthday updated", saved.title)
+        assertEquals(original.start, saved.start)
+        assertEquals(Repeat.YEARLY, saved.repeat)
+    }
+
+    @Test fun `dismiss protects a changed draft and allows explicit discard`() {
+        compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("New task").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithContentDescription("New task").performClick()
+        compose.onNode(hasSetTextAction() and hasText("Task")).performTextInput("Keep this draft")
+        compose.onNode(SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss)).performSemanticsAction(SemanticsActions.Dismiss) { it() }
+        compose.onNodeWithText("Discard changes?").assertExists()
+        compose.onNodeWithText("Keep editing").performClick()
+        compose.onNode(hasSetTextAction() and hasText("Task")).assertTextContains("Keep this draft")
+        compose.onNode(SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss)).performSemanticsAction(SemanticsActions.Dismiss) { it() }
+        compose.onNodeWithText("Discard").performClick()
+        compose.onNodeWithContentDescription("New task").performClick()
+        compose.onNode(hasSetTextAction() and hasText("Task")).assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, androidx.compose.ui.text.AnnotatedString("")))
+        val app = uiApp()
+        assertTrue(compose.runOnIdle { app.store.allTasks().isEmpty() })
     }
 }
