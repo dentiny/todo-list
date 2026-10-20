@@ -33,3 +33,7 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# Local tools and OS metadata
+.local/
+.DS_Store
