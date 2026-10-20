@@ -8,12 +8,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
+import com.daymark.app.R
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
@@ -39,7 +39,7 @@ import java.time.*
             Text("PRIORITY", color = Muted, style = MaterialTheme.typography.labelSmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Priority.entries.forEach { p -> FilterChip(selected = p == priority, onClick = { priority = p }, enabled = !moved,
-                    label = { Text(p.name) }, leadingIcon = { Icon(Icons.Outlined.Flag, null, tint = p.color(), modifier = Modifier.size(16.dp)) }) }
+                    label = { Text(p.name) }, leadingIcon = { Icon(painterResource(R.drawable.ic_flag), null, tint = p.color(), modifier = Modifier.size(16.dp)) }) }
             }
             Text(when (priority) { Priority.P0 -> "Must do. Unfinished tasks carry into the next day automatically."; else -> "Nice to do. You choose whether to bring it into the next day." }, color = Muted, style = MaterialTheme.typography.bodyMedium)
             if (task != null && !moved) {
@@ -87,10 +87,10 @@ import java.time.*
             Text("WHEN", color = Muted, style = MaterialTheme.typography.labelSmall)
             OutlinedButton(onClick = {
                 DatePickerDialog(context, { _, year, month, day -> dateString = LocalDate.of(year, month + 1, day).toString() }, date.year, date.monthValue - 1, date.dayOfMonth).show()
-            }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.CalendarMonth, null, modifier = Modifier.padding(end = 10.dp).size(20.dp)); Text(date.label("EEE, MMM d, yyyy")) }
+            }, modifier = Modifier.fillMaxWidth()) { Icon(painterResource(R.drawable.ic_calendar_month), null, modifier = Modifier.padding(end = 10.dp).size(20.dp)); Text(date.label("EEE, MMM d, yyyy")) }
             OutlinedButton(onClick = {
                 TimePickerDialog(context, { _, hour, minute -> timeString = LocalTime.of(hour, minute).toString() }, time.hour, time.minute, true).show()
-            }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Schedule, null, modifier = Modifier.padding(end = 10.dp).size(20.dp)); Text("Time · ${start.label("HH:mm")}") }
+            }, modifier = Modifier.fillMaxWidth()) { Icon(painterResource(R.drawable.ic_schedule), null, modifier = Modifier.padding(end = 10.dp).size(20.dp)); Text("Time · ${start.label("HH:mm")}") }
             if (invalidPast) Text("Choose a future date and time for a one-time event.", color = Clay, style = MaterialTheme.typography.bodyMedium)
             Text("REPEAT", color = Muted, style = MaterialTheme.typography.labelSmall)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

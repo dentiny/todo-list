@@ -3,6 +3,7 @@
 package com.daymark.app.ui
 
 import android.Manifest
+import androidx.annotation.DrawableRes
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -16,19 +17,15 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowForward
-import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowLeft
-import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
+import com.daymark.app.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.*
@@ -85,10 +82,10 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
             Column(Modifier.background(Paper)) {
                 HorizontalDivider(color = Line)
                 NavigationBar(containerColor = Paper, tonalElevation = 0.dp) {
-                    listOf("Today" to Icons.Outlined.CheckCircle, "Events" to Icons.Outlined.Event, "Journal" to Icons.Outlined.AutoStories).forEach { (name, icon) ->
+                    listOf("Today" to R.drawable.ic_check_circle, "Events" to R.drawable.ic_event, "Journal" to R.drawable.ic_auto_stories).forEach { (name, icon) ->
                         NavigationBarItem(selected = tab == name,
                             onClick = { tab = name; if (name == "Today") model.select(state.today) },
-                            icon = { Icon(icon, null) }, label = { Text(name) },
+                            icon = { Icon(painterResource(icon), null) }, label = { Text(name) },
                             colors = NavigationBarItemDefaults.colors(selectedIconColor = Forest, selectedTextColor = Forest, indicatorColor = Color(0xFFE7EBDF), unselectedIconColor = Muted, unselectedTextColor = Muted))
                     }
                 }
@@ -99,7 +96,7 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
                 modifier = Modifier.semantics { contentDescription = if (tab == "Events") "New event" else "New task" },
                 onClick = { if (tab == "Events") newEvent() else newTask(Priority.P0) },
                 containerColor = Forest, contentColor = Color.White, shape = RoundedCornerShape(19.dp),
-                icon = { Icon(Icons.Outlined.Add, null) }, text = { Text(if (tab == "Events") "New event" else "New task") },
+                icon = { Icon(painterResource(R.drawable.ic_add), null) }, text = { Text(if (tab == "Events") "New event" else "New task") },
             )
         },
     ) { padding ->
@@ -109,7 +106,7 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
                     Box(Modifier.size(9.dp).background(Forest, CircleShape))
                     Text("DAYMARK", style = MaterialTheme.typography.labelSmall, color = Forest, letterSpacing = 2.5.sp)
                 }
-                IconButton(onClick = { settingsOpen = true }) { Icon(Icons.Outlined.NotificationsNone, "Reminder settings", tint = Forest) }
+                IconButton(onClick = { settingsOpen = true }) { Icon(painterResource(R.drawable.ic_notifications_none), "Reminder settings", tint = Forest) }
             }
             when {
                 state.loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Forest) }
@@ -161,7 +158,7 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
 @Composable private fun SettingRow(title: String, detail: String, enabled: Boolean) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) { Text(title, style = MaterialTheme.typography.titleMedium); Text(detail, color = Muted, style = MaterialTheme.typography.bodyMedium) }
-        Icon(if (enabled) Icons.Outlined.CheckCircle else Icons.Outlined.Info, null, tint = if (enabled) Forest else Clay)
+        Icon(painterResource(if (enabled) R.drawable.ic_check_circle else R.drawable.ic_info), null, tint = if (enabled) Forest else Clay)
     }
 }
 
@@ -181,7 +178,7 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
                 Spacer(Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(selected.label("EEEE, MMMM d"), color = Muted, modifier = Modifier.weight(1f))
-                    IconButton(onClick = openCalendar, modifier = Modifier.size(48.dp)) { Icon(Icons.Outlined.CalendarMonth, "Choose date", tint = Forest) }
+                    IconButton(onClick = openCalendar, modifier = Modifier.size(48.dp)) { Icon(painterResource(R.drawable.ic_calendar_month), "Choose date", tint = Forest) }
                 }
                 if (!isToday) TextButton(onClick = { model.select(state.today) }, contentPadding = PaddingValues(0.dp)) { Text("Back to today") }
             }
@@ -212,7 +209,7 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
                         }
                         Text(priority.subtitle, Modifier.padding(start = 10.dp).weight(1f), style = MaterialTheme.typography.titleMedium)
                         Text("${tasks.count { it.status == TaskStatus.DONE }}/${tasks.size}", color = Muted, style = MaterialTheme.typography.labelMedium)
-                        IconButton(onClick = { newTask(priority) }) { Icon(Icons.Outlined.Add, "Add ${priority.name} task", tint = priority.color()) }
+                        IconButton(onClick = { newTask(priority) }) { Icon(painterResource(R.drawable.ic_add), "Add ${priority.name} task", tint = priority.color()) }
                     }
                     if (tasks.isEmpty()) {
                         Text(if (priority == Priority.P0) "What needs your attention?" else "Space for a little more.", modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { newTask(priority) }.padding(vertical = 18.dp, horizontal = 12.dp), color = Muted, style = MaterialTheme.typography.bodyMedium)
@@ -225,7 +222,7 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
         }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                SectionTitle("Events", "TODAY & TOMORROW", Icons.Outlined.Event, newEvent)
+                SectionTitle("Events", "TODAY & TOMORROW", R.drawable.ic_event, newEvent)
                 val occurrences = state.events.flatMap { listOfNotNull(EventRules.onDay(it, selected), EventRules.onDay(it, selected.plusDays(1))) }.sortedBy { it.at }
                 if (occurrences.isEmpty()) Text("A little breathing room. No events scheduled.", color = Muted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(vertical = 8.dp))
                 occurrences.forEach { EventCard(it.event, it.at, if (it.at.toLocalDate() == selected) "Today" else "Tomorrow", { editEvent(it.event) }) }
@@ -258,8 +255,8 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
     val terminal = task.status == TaskStatus.STALE || task.status == TaskStatus.MOVED
     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = edit).padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
         if (terminal) Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-            Icon(if (task.status == TaskStatus.STALE) Icons.Outlined.RemoveCircleOutline else Icons.AutoMirrored.Outlined.ArrowForward, null, tint = Muted, modifier = Modifier.size(21.dp))
-        } else Checkbox(checked = task.status == TaskStatus.DONE, onCheckedChange = { toggle() }, colors = CheckboxDefaults.colors(checkedColor = Forest, uncheckedColor = Line.copy(alpha = 1f).let { Color(0xFF90988A) }), modifier = Modifier.semantics { contentDescription = "Complete ${task.title}" })
+            Icon(painterResource(if (task.status == TaskStatus.STALE) R.drawable.ic_remove_circle_outline else R.drawable.ic_arrow_forward), null, tint = Muted, modifier = Modifier.size(21.dp))
+        } else Checkbox(checked = task.status == TaskStatus.DONE, onCheckedChange = { toggle() }, colors = CheckboxDefaults.colors(checkedColor = Forest, uncheckedColor = Color(0xFF90988A)), modifier = Modifier.semantics { contentDescription = "Complete ${task.title}" })
         Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
             Text(task.title, color = if (task.status == TaskStatus.OPEN) Ink else Muted,
                 textDecoration = if (task.status == TaskStatus.DONE || task.status == TaskStatus.STALE) TextDecoration.LineThrough else null,
@@ -272,7 +269,7 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
             }
             detail?.let { Text(it, color = Muted, style = MaterialTheme.typography.labelMedium) }
         }
-        Icon(Icons.Outlined.MoreHoriz, "Edit ${task.title}", tint = Muted, modifier = Modifier.padding(12.dp).size(20.dp))
+        Icon(painterResource(R.drawable.ic_more_horiz), "Edit ${task.title}", tint = Muted, modifier = Modifier.padding(12.dp).size(20.dp))
     }
 }
 
@@ -284,12 +281,12 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
     Surface(color = Color(0xFFF0EADF), shape = RoundedCornerShape(20.dp), modifier = Modifier.animateContentSize()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth().clickable { expanded = !expanded }, verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.History, null, tint = Olive, modifier = Modifier.padding(end = 12.dp))
+                Icon(painterResource(R.drawable.ic_history), null, tint = Olive, modifier = Modifier.padding(end = 12.dp))
                 Column(Modifier.weight(1f)) {
                     Text("A fresh look", style = MaterialTheme.typography.titleMedium)
                     Text("${tasks.size} optional task${if (tasks.size == 1) "" else "s"} from earlier days", style = MaterialTheme.typography.bodyMedium, color = Muted)
                 }
-                IconButton(onClick = { expanded = !expanded }) { Icon(if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, if (expanded) "Collapse carry-over review" else "Review carry-over tasks") }
+                IconButton(onClick = { expanded = !expanded }) { Icon(painterResource(if (expanded) R.drawable.ic_expand_less else R.drawable.ic_expand_more), if (expanded) "Collapse carry-over review" else "Review carry-over tasks") }
             }
             if (expanded) {
                 Text("Bring what still matters into today.", color = Muted, style = MaterialTheme.typography.bodyMedium)
@@ -301,7 +298,7 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
                             Text(task.title, style = MaterialTheme.typography.bodyMedium)
                             Text("${task.priority.name} · ${task.day.label("MMM d")}", color = Muted, style = MaterialTheme.typography.labelMedium)
                         }
-                        IconButton(onClick = { edit(task) }) { Icon(Icons.Outlined.MoreHoriz, "Edit ${task.title}", tint = Muted) }
+                        IconButton(onClick = { edit(task) }) { Icon(painterResource(R.drawable.ic_more_horiz), "Edit ${task.title}", tint = Muted) }
                     }
                 }
                 Button(onClick = { carry(selected); selection = emptySet() }, enabled = selected.isNotEmpty(), modifier = Modifier.fillMaxWidth()) { Text("Move to today${if (selected.isEmpty()) "" else " (${selected.size})"}") }
@@ -311,11 +308,11 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
     }
 }
 
-@Composable private fun SectionTitle(title: String, subtitle: String, icon: ImageVector, add: () -> Unit) {
+@Composable private fun SectionTitle(title: String, subtitle: String, @DrawableRes icon: Int, add: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, tint = Forest, modifier = Modifier.padding(end = 10.dp).size(21.dp))
+        Icon(painterResource(icon), null, tint = Forest, modifier = Modifier.padding(end = 10.dp).size(21.dp))
         Column(Modifier.weight(1f)) { Text(title, style = MaterialTheme.typography.titleLarge); Text(subtitle, color = Muted, style = MaterialTheme.typography.labelSmall) }
-        IconButton(onClick = add) { Icon(Icons.Outlined.Add, "Add event", tint = Forest) }
+        IconButton(onClick = add) { Icon(painterResource(R.drawable.ic_add), "Add event", tint = Forest) }
     }
 }
 
@@ -331,7 +328,7 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
                 Text(event.title, style = MaterialTheme.typography.titleMedium)
                 Text(if (event.repeat == Repeat.ONCE) at.label("EEE, MMM d") else event.repeat.label, color = Muted, style = MaterialTheme.typography.bodyMedium)
             }
-            if (event.repeat != Repeat.ONCE) Icon(Icons.Outlined.Repeat, "Repeating event", tint = Muted, modifier = Modifier.size(18.dp))
+            if (event.repeat != Repeat.ONCE) Icon(painterResource(R.drawable.ic_repeat), "Repeating event", tint = Muted, modifier = Modifier.size(18.dp))
         }
     }
 }
@@ -345,16 +342,16 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
         item {
             Surface(onClick = settings, color = Color(0xFFE9EDE3), shape = RoundedCornerShape(18.dp)) {
                 Row(Modifier.fillMaxWidth().padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.NotificationsNone, null, tint = Forest)
+                    Icon(painterResource(R.drawable.ic_notifications_none), null, tint = Forest)
                     Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                         Text(if (!state.notificationsAllowed) "Turn on your reminders" else if (!state.exactAllowed) "Fine-tune reminder timing" else "One less thing to remember", color = Forest, style = MaterialTheme.typography.titleMedium)
                         Text(if (!state.notificationsAllowed || !state.exactAllowed) "Tap to finish setting up reminders" else "A heads-up 24 hours and 30 minutes before", color = Forest, style = MaterialTheme.typography.bodyMedium)
                     }
-                    Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = Forest)
+                    Icon(painterResource(R.drawable.ic_keyboard_arrow_right), null, tint = Forest)
                 }
             }
         }
-        if (state.events.isEmpty()) item { EmptyNote(Icons.Outlined.Event, "Good things ahead.", "An exam, a birthday, a coffee with a friend. Give it a date and we'll remember.", "Add your first event", add) }
+        if (state.events.isEmpty()) item { EmptyNote(R.drawable.ic_event, "Good things ahead.", "An exam, a birthday, a coffee with a friend. Give it a date and we'll remember.", "Add your first event", add) }
         if (upcoming.isNotEmpty()) item { Text("UPCOMING", color = Muted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 8.dp)) }
         items(upcoming, key = { it.event.id }) { occurrence -> EventCard(occurrence.event, occurrence.at, occurrence.at.label("MMM d")) { edit(occurrence.event) } }
         if (past.isNotEmpty()) item { Text("PAST EVENTS", color = Muted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 12.dp)) }
@@ -380,16 +377,16 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
                         Text(if (day == state.today) "Today" else day.label("EEEE, yyyy"), style = MaterialTheme.typography.titleMedium)
                         Text(if (tasks.isEmpty()) "A quiet page" else "$done completed · $moved carried · ${tasks.count { it.status == TaskStatus.STALE }} stale", color = Muted, style = MaterialTheme.typography.bodyMedium)
                     }
-                    Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, "Open ${day.label("MMMM d")}", tint = Muted)
+                    Icon(painterResource(R.drawable.ic_keyboard_arrow_right), "Open ${day.label("MMMM d")}", tint = Muted)
                 }
             }
         }
     }
 }
 
-@Composable private fun EmptyNote(icon: ImageVector, title: String, body: String, action: String, onAction: () -> Unit) {
+@Composable private fun EmptyNote(@DrawableRes icon: Int, title: String, body: String, action: String, onAction: () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(vertical = 40.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Box(Modifier.size(64.dp).background(Color(0xFFE9EDE3), CircleShape), contentAlignment = Alignment.Center) { Icon(icon, null, tint = Forest, modifier = Modifier.size(28.dp)) }
+        Box(Modifier.size(64.dp).background(Color(0xFFE9EDE3), CircleShape), contentAlignment = Alignment.Center) { Icon(painterResource(icon), null, tint = Forest, modifier = Modifier.size(28.dp)) }
         Text(title, style = MaterialTheme.typography.headlineMedium)
         Text(body, color = Muted, modifier = Modifier.padding(horizontal = 16.dp))
         OutlinedButton(onClick = onAction) { Text(action) }
