@@ -14,6 +14,15 @@ For command-line builds, install JDK 17 and Android SDK 36, set `ANDROID_HOME` (
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
+For a small APK to install on your phone, use the optimized release build:
+
+```sh
+./gradlew assembleRelease lintRelease
+adb install -r app/build/outputs/apk/release/app-release.apk
+```
+
+Release builds remove unused code and resources with R8 and include only English resources. The app bundles only its 17 selected vector icons; it has no full icon library, preview tooling, or UI inspector. The personal sideload build uses the local debug signing key, matching earlier APKs built on the same machine so they can be updated in place without clearing SQLite data. Store distribution requires a separate private signing configuration.
+
 The Gradle wrapper is included. The first build downloads its dependencies. Runtime use is entirely offline; the manifest has no internet permission.
 
 ## Your day
