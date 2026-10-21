@@ -19,6 +19,7 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    sourceSets.getByName("main").assets.srcDir(rootProject.file("database"))
     buildFeatures { compose = true }
     buildTypes {
         release {

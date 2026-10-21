@@ -11,31 +11,26 @@ import java.time.LocalDateTime
 import java.time.Instant
 import java.util.UUID
 
-class DaymarkDatabase(context: Context, name: String = "daymark.db") : SQLiteOpenHelper(context, name, null, 2) {
+class DaymarkDatabase(private val context: Context, name: String = "daymark.db") : SQLiteOpenHelper(context, name, null, SCHEMA_VERSION) {
     init { setWriteAheadLoggingEnabled(true) }
-    override fun onCreate(db: SQLiteDatabase) {
-        db.execSQL("""CREATE TABLE tasks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, root_id TEXT NOT NULL, title TEXT NOT NULL,
-            priority TEXT NOT NULL CHECK(priority IN ('P0','P1','P2')),
-            status TEXT NOT NULL CHECK(status IN ('OPEN','DONE','STALE','MOVED')),
-            day TEXT NOT NULL, origin_day TEXT NOT NULL, moved_to TEXT,
-            review_dismissed INTEGER NOT NULL DEFAULT 0)""")
-        db.execSQL("CREATE INDEX tasks_day ON tasks(day)")
-        db.execSQL("CREATE UNIQUE INDEX one_open_per_root ON tasks(root_id) WHERE status = 'OPEN'")
-        db.execSQL("""CREATE TABLE events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, start TEXT NOT NULL,
-            repeat TEXT NOT NULL CHECK(repeat IN ('ONCE','DAILY','WEEKLY','MONTHLY','YEARLY')), version INTEGER NOT NULL DEFAULT 1,
-            next_24h_at INTEGER, next_30m_at INTEGER, notified_24h TEXT, notified_30m TEXT)""")
-        createEventIndexes(db)
-    }
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        error("Development schema changed; clear app data to recreate the database.")
+
+    override fun onCreate(db: SQLiteDatabase) = applySchemas(db, 1, SCHEMA_VERSION)
+
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) =
+        applySchemas(db, oldVersion + 1, newVersion)
+
+    private fun applySchemas(db: SQLiteDatabase, from: Int, to: Int) {
+        for (version in from..to) {
+            val file = version.toString().padStart(4, '0') + ".sql"
+            val sql = context.assets.open(file).bufferedReader().use { it.readText() }
+            sql.lineSequence().filterNot { it.trimStart().startsWith("--") }
+                .joinToString("\n").split(';').map { it.trim() }.filter { it.isNotEmpty() }
+                .forEach { db.execSQL(it) }
+        }
     }
 
-    private fun createEventIndexes(db: SQLiteDatabase) {
-        db.execSQL("CREATE INDEX events_start ON events(start)")
-        db.execSQL("CREATE INDEX events_next_24h ON events(next_24h_at) WHERE next_24h_at IS NOT NULL")
-        db.execSQL("CREATE INDEX events_next_30m ON events(next_30m_at) WHERE next_30m_at IS NOT NULL")
+    companion object {
+        private const val SCHEMA_VERSION = 1
     }
 }
 

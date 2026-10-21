@@ -83,4 +83,4 @@ The app is unreleased. Recreate development databases after schema changes; back
 
 Built with Kotlin, Jetpack Compose, SQLite, and Android AlarmManager. Runtime use is entirely offline.
 
-The [database schema](docs/schema.sql) lists both tables and their indexes. Pending notification times use indexed Unix epoch seconds; reminder state stays on each event.
+Numbered SQL files in [`database/`](database/0001.sql) manage the database schema and its indexes. The app executes `0001.sql` for the initial version; future changes add `0002.sql`, `0003.sql`, and so on, and increment `SCHEMA_VERSION` in `DaymarkDatabase`. Creation applies all versions; upgrades apply only newer versions, in order. Keep numbered scripts as semicolon-separated SQL statements. Pending notification times use indexed Unix epoch seconds; reminder state stays on each event.

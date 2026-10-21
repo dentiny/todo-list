@@ -1,4 +1,4 @@
--- Daymark schema v2: two application tables.
+-- Schema version 1: two application tables.
 -- Initial development schema; recreate development databases when this schema changes.
 
 CREATE TABLE tasks (
