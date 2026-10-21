@@ -64,7 +64,7 @@ Allow notifications and precise reminders through the bell button. Android may d
 
 ### Private by default
 
-Tasks and events live in app-private SQLite on the phone. There is no account, sync, analytics, remote storage, or export. Cloud backup and device transfer are disabled. Uninstalling the app deletes its data.
+Tasks and events live in two app-private SQLite tables on the phone. There is no account, sync, analytics, remote storage, or export. Cloud backup and device transfer are disabled. Uninstalling the app deletes its data.
 
 The interface is entirely in English. Android 8.0 (API 26) or later is supported.
 
@@ -79,4 +79,8 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 
 The optimized release is about **1.3 MB**, with unused code and resources removed. It uses the local debug signing key for personal sideloading; updates need the same key to preserve the existing installation. Store distribution requires a private signing configuration.
 
+The app is unreleased. Recreate development databases after schema changes; backward-compatible migrations are not maintained yet.
+
 Built with Kotlin, Jetpack Compose, SQLite, and Android AlarmManager. Runtime use is entirely offline.
+
+Numbered SQL files in [`database/`](database/0001.sql) manage the database schema and its indexes. The app executes `0001.sql` for the initial version; future changes add `0002.sql`, `0003.sql`, and so on, and increment `SCHEMA_VERSION` in `DaymarkDatabase`. Creation applies all versions; upgrades apply only newer versions, in order. Keep numbered scripts as semicolon-separated SQL statements. Pending notification times use indexed Unix epoch seconds; reminder state stays on each event.

@@ -37,10 +37,11 @@ class ReminderScheduler(private val context: Context, private val store: Daymark
         store.rollOver(now.atZone(zone).toLocalDate())
         // Deliver already-due persisted schedules before replacing alarms. This prevents
         // midnight/resume/reboot from cancelling a reminder that Android has not delivered yet.
-        store.scheduledReminders().forEach { saved ->
-            store.event(saved.eventId)?.takeIf { it.version == saved.version }?.let { event ->
-                deliverIfDue(event, saved.occurrence, saved.lead, now, zone)
-            }
+        store.dueEvents(now).forEach { event ->
+            LEADS.forEach { lead -> event.pendingReminder(lead)?.takeIf { it <= now }?.let { trigger ->
+                val at = trigger.plusSeconds(lead * 60).atZone(zone).toLocalDateTime()
+                if (EventRules.onDay(event, at.toLocalDate())?.at == at) deliverIfDue(event, at, lead, now, zone)
+            } }
         }
         store.events().forEach { event -> LEADS.forEach { schedule(event, it, now, zone) } }
         val midnight = now.atZone(zone).toLocalDate().plusDays(1).atStartOfDay(zone).toInstant()
@@ -61,7 +62,7 @@ class ReminderScheduler(private val context: Context, private val store: Daymark
         val reminder = EventRules.nextReminder(event, lead, now, zone)
         val intent = eventIntent(event.id, lead, event, reminder)
         alarms.cancel(intent)
-        store.saveSchedule(event, lead, reminder?.occurrence)
+        store.saveSchedule(event, lead, reminder?.trigger)
         if (reminder != null) setAlarm(reminder.trigger, intent)
     }
 
@@ -90,7 +91,7 @@ class ReminderScheduler(private val context: Context, private val store: Daymark
 
     private fun deliverIfDue(event: Event, at: LocalDateTime, lead: Long, now: Instant, zone: ZoneId) {
         val trigger = at.atZone(zone).toInstant().minusSeconds(lead * 60)
-        if (trigger <= now && now < at.atZone(zone).toInstant() && notificationsAllowed && store.markDelivered(event.id, at, lead)) {
+        if (trigger <= now && now < at.atZone(zone).toInstant() && notificationsAllowed && store.markNotified(event, Reminder(at, trigger), lead)) {
             show(event, at, lead)
         }
     }

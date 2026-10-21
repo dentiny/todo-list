@@ -11,14 +11,15 @@ android {
         applicationId = "com.daymark.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.0.2"
+        versionCode = 5
+        versionName = "1.0.4"
         resourceConfigurations += "en"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    sourceSets.getByName("main").assets.srcDir(rootProject.file("database"))
     buildFeatures { compose = true }
     buildTypes {
         release {

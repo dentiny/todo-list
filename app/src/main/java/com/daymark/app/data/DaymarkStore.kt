@@ -8,34 +8,29 @@ import android.database.sqlite.SQLiteOpenHelper
 import com.daymark.app.domain.*
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.Instant
 import java.util.UUID
 
-class DaymarkDatabase(context: Context, name: String = "daymark.db") : SQLiteOpenHelper(context, name, null, 1) {
+class DaymarkDatabase(private val context: Context, name: String = "daymark.db") : SQLiteOpenHelper(context, name, null, SCHEMA_VERSION) {
     init { setWriteAheadLoggingEnabled(true) }
-    override fun onConfigure(db: SQLiteDatabase) { db.setForeignKeyConstraintsEnabled(true) }
-    override fun onCreate(db: SQLiteDatabase) {
-        db.execSQL("""CREATE TABLE tasks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, root_id TEXT NOT NULL, title TEXT NOT NULL,
-            priority TEXT NOT NULL CHECK(priority IN ('P0','P1','P2')),
-            status TEXT NOT NULL CHECK(status IN ('OPEN','DONE','STALE','MOVED')),
-            day TEXT NOT NULL, origin_day TEXT NOT NULL, moved_to TEXT,
-            review_dismissed INTEGER NOT NULL DEFAULT 0)""")
-        db.execSQL("CREATE INDEX tasks_day ON tasks(day)")
-        db.execSQL("CREATE UNIQUE INDEX one_open_per_root ON tasks(root_id) WHERE status = 'OPEN'")
-        db.execSQL("""CREATE TABLE events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, start TEXT NOT NULL,
-            repeat TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1)""")
-        db.execSQL("""CREATE TABLE delivered (
-            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-            occurrence TEXT NOT NULL, lead INTEGER NOT NULL,
-            PRIMARY KEY(event_id, occurrence, lead))""")
-        db.execSQL("""CREATE TABLE scheduled_reminders (
-            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-            lead INTEGER NOT NULL, occurrence TEXT NOT NULL, version INTEGER NOT NULL,
-            PRIMARY KEY(event_id, lead))""")
+
+    override fun onCreate(db: SQLiteDatabase) = applySchemas(db, 1, SCHEMA_VERSION)
+
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) =
+        applySchemas(db, oldVersion + 1, newVersion)
+
+    private fun applySchemas(db: SQLiteDatabase, from: Int, to: Int) {
+        for (version in from..to) {
+            val file = version.toString().padStart(4, '0') + ".sql"
+            val sql = context.assets.open(file).bufferedReader().use { it.readText() }
+            sql.lineSequence().filterNot { it.trimStart().startsWith("--") }
+                .joinToString("\n").split(';').map { it.trim() }.filter { it.isNotEmpty() }
+                .forEach { db.execSQL(it) }
+        }
     }
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        error("A migration is required for database version $newVersion")
+
+    companion object {
+        private const val SCHEMA_VERSION = 1
     }
 }
 
@@ -102,9 +97,15 @@ class DaymarkStore(private val helper: DaymarkDatabase) {
     @Synchronized fun saveEvent(event: Event): Long {
         require(event.title.isNotBlank())
         require(event.start.second == 0 && event.start.nano == 0)
+        val previous = if (event.id == 0L) null else this.event(event.id)
         val values = ContentValues().apply {
             put("title", event.title.trim()); put("start", event.start.toString()); put("repeat", event.repeat.name)
-            put("version", if (event.id == 0L) 1L else (this@DaymarkStore.event(event.id)?.version ?: 0) + 1)
+            put("version", (previous?.version ?: 0) + 1)
+            // Pending alarms belong to the previous version. Title-only edits retain deduplication.
+            putNull("next_24h_at"); putNull("next_30m_at")
+            if (previous == null || previous.start != event.start || previous.repeat != event.repeat) {
+                putNull("notified_24h"); putNull("notified_30m")
+            }
         }
         return if (event.id == 0L) db.insertOrThrow("events", null, values) else {
             db.update("events", values, "id = ?", arrayOf(event.id.toString())); event.id
@@ -113,24 +114,26 @@ class DaymarkStore(private val helper: DaymarkDatabase) {
 
     @Synchronized fun deleteEvent(id: Long) { db.delete("events", "id = ?", arrayOf(id.toString())) }
 
-    @Synchronized fun scheduledReminders(): List<ScheduledReminder> = db.rawQuery("SELECT * FROM scheduled_reminders", null).use { c ->
-        buildList { while (c.moveToNext()) add(ScheduledReminder(
-            c.getLong(c.getColumnIndexOrThrow("event_id")), c.getLong(c.getColumnIndexOrThrow("lead")),
-            LocalDateTime.parse(c.text("occurrence")), c.getLong(c.getColumnIndexOrThrow("version")),
-        )) }
+    @Synchronized fun dueEvents(now: Instant): List<Event> = db.rawQuery(
+        "SELECT * FROM events WHERE next_24h_at <= ? OR next_30m_at <= ?",
+        arrayOf(now.epochSecond.toString(), now.epochSecond.toString()),
+    ).use { c -> buildList { while (c.moveToNext()) add(c.event()) } }
+
+    @Synchronized fun saveSchedule(event: Event, lead: Long, trigger: Instant?) {
+        db.update("events", ContentValues().apply { put("next_${leadSuffix(lead)}_at", trigger?.epochSecond) },
+            "id = ? AND version = ?", arrayOf(event.id.toString(), event.version.toString()))
     }
 
-    @Synchronized fun saveSchedule(event: Event, lead: Long, occurrence: LocalDateTime?) {
-        if (occurrence == null) db.delete("scheduled_reminders", "event_id = ? AND lead = ?", arrayOf(event.id.toString(), lead.toString()))
-        else db.insertWithOnConflict("scheduled_reminders", null, ContentValues().apply {
-            put("event_id", event.id); put("lead", lead); put("occurrence", occurrence.toString()); put("version", event.version)
-        }, SQLiteDatabase.CONFLICT_REPLACE)
+    /** Atomically claim a pending occurrence before posting, including concurrent/duplicate callbacks. */
+    @Synchronized fun markNotified(event: Event, reminder: Reminder, lead: Long): Boolean {
+        val suffix = leadSuffix(lead)
+        val at = reminder.occurrence.toString()
+        return db.update("events", ContentValues().apply { put("notified_$suffix", at); putNull("next_${suffix}_at") },
+            "id = ? AND version = ? AND next_${suffix}_at = ? AND (notified_$suffix IS NULL OR notified_$suffix < ?)",
+            arrayOf(event.id.toString(), event.version.toString(), reminder.trigger.epochSecond.toString(), at)) == 1
     }
 
-    @Synchronized fun markDelivered(eventId: Long, occurrence: LocalDateTime, lead: Long): Boolean =
-        db.insertWithOnConflict("delivered", null, ContentValues().apply {
-            put("event_id", eventId); put("occurrence", occurrence.toString()); put("lead", lead)
-        }, SQLiteDatabase.CONFLICT_IGNORE) != -1L
+    private fun leadSuffix(lead: Long): String = when (lead) { 1440L -> "24h"; 30L -> "30m"; else -> error("Invalid reminder lead") }
 
     private fun findTask(id: Long): Task? = queryTasks("id = ?", arrayOf(id.toString())).firstOrNull()
     private fun insert(task: Task) = db.insertOrThrow("tasks", null, taskValues(task))
@@ -144,6 +147,8 @@ class DaymarkStore(private val helper: DaymarkDatabase) {
     ).use { c -> buildList { while (c.moveToNext()) add(c.task()) } }
 
     private fun Cursor.text(name: String): String = getString(getColumnIndexOrThrow(name))
+    private fun Cursor.dateTime(name: String): LocalDateTime? = getString(getColumnIndexOrThrow(name))?.let(LocalDateTime::parse)
+    private fun Cursor.instant(name: String): Instant? = getColumnIndexOrThrow(name).let { if (isNull(it)) null else Instant.ofEpochSecond(getLong(it)) }
     private fun Cursor.task() = Task(
         id = getLong(getColumnIndexOrThrow("id")), rootId = text("root_id"), title = text("title"),
         priority = Priority.valueOf(text("priority")), status = TaskStatus.valueOf(text("status")),
@@ -154,6 +159,7 @@ class DaymarkStore(private val helper: DaymarkDatabase) {
     private fun Cursor.event() = Event(
         id = getLong(getColumnIndexOrThrow("id")), title = text("title"), start = LocalDateTime.parse(text("start")),
         repeat = Repeat.valueOf(text("repeat")), version = getLong(getColumnIndexOrThrow("version")),
+        next24h = instant("next_24h_at"), next30m = instant("next_30m_at"), notified24h = dateTime("notified_24h"), notified30m = dateTime("notified_30m"),
     )
     private inline fun transaction(block: () -> Unit) {
         db.beginTransaction()

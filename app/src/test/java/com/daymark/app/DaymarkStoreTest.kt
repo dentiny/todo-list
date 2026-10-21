@@ -1,6 +1,7 @@
 package com.daymark.app
 
 import android.content.Context
+import android.database.sqlite.SQLiteConstraintException
 import androidx.test.core.app.ApplicationProvider
 import com.daymark.app.data.*
 import com.daymark.app.domain.*
@@ -24,6 +25,12 @@ class DaymarkStoreTest {
         store = DaymarkStore(helper)
     }
     @After fun close() { helper.close() }
+
+    private fun reminder(at: LocalDateTime, lead: Long) = Reminder(at, at.toInstant(ZoneOffset.UTC).minusSeconds(lead * 60))
+    private fun saveSchedule(event: Event, lead: Long, at: LocalDateTime) = store.saveSchedule(event, lead, reminder(at, lead).trigger)
+    private fun markNotified(id: Long, version: Long, at: LocalDateTime, lead: Long) =
+        store.markNotified(Event(id = id, title = "", start = at, version = version), reminder(at, lead), lead)
+
 
     @Test fun `P0 carries through every missed day and rollover is idempotent`() {
         store.addTask("Prepare for exam", Priority.P0, first)
@@ -124,18 +131,104 @@ class DaymarkStoreTest {
         assertTrue(store.pending(first).isEmpty())
     }
 
-    @Test fun `event edits invalidate old alarm versions and deletion removes delivery records`() {
+    @Test fun `event edits invalidate old alarms and deleting an event removes its reminder state`() {
         val event = Event(title = "Birthday", start = LocalDateTime.parse("2026-10-20T17:23"), repeat = Repeat.YEARLY)
         val id = store.saveEvent(event)
         assertEquals(event.start, store.event(id)!!.start)
         assertEquals(1L, store.event(id)!!.version)
-        assertTrue(store.markDelivered(id, event.start, 30))
-        assertFalse(store.markDelivered(id, event.start, 30))
+        saveSchedule(store.event(id)!!, 30, event.start)
+        assertTrue(markNotified(id, 1, event.start, 30))
+        assertFalse(markNotified(id, 1, event.start, 30))
         store.saveEvent(store.event(id)!!.copy(title = "Dinner"))
         assertEquals(2L, store.event(id)!!.version)
+        assertEquals(event.start, store.event(id)!!.notified30m)
         store.deleteEvent(id)
         assertNull(store.event(id))
-        helper.readableDatabase.rawQuery("SELECT COUNT(*) FROM delivered", null).use { it.moveToFirst(); assertEquals(0, it.getInt(0)) }
+        assertFalse(markNotified(id, 2, event.start, 30))
+    }
+
+    @Test fun `only tasks and events exist with the expected indexes`() {
+        helper.readableDatabase.rawQuery("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != 'android_metadata'", null).use { cursor ->
+            val tables = buildSet { while (cursor.moveToNext()) add(cursor.getString(0)) }
+            assertEquals(setOf("tasks", "events"), tables)
+        }
+        helper.readableDatabase.rawQuery("SELECT name FROM sqlite_master WHERE type = 'index' AND sql IS NOT NULL", null).use { cursor ->
+            val indexes = buildSet { while (cursor.moveToNext()) add(cursor.getString(0)) }
+            assertEquals(setOf("tasks_day", "one_open_per_root", "events_start", "events_next_24h", "events_next_30m"), indexes)
+        }
+    }
+
+    @Test fun `repeat accepts only the five supported values on insert and update`() {
+        val db = helper.writableDatabase
+        Repeat.entries.forEach { repeat ->
+            db.execSQL("INSERT INTO events (title, start, repeat) VALUES (?, ?, ?)", arrayOf("Event", "2026-10-20T10:00", repeat.name))
+        }
+        listOf("", "daily", "FORTNIGHTLY").forEach { invalid ->
+            assertThrows(SQLiteConstraintException::class.java) {
+                db.execSQL("INSERT INTO events (title, start, repeat) VALUES (?, ?, ?)", arrayOf("Invalid", "2026-10-20T10:00", invalid))
+            }
+            assertThrows(SQLiteConstraintException::class.java) {
+                db.execSQL("UPDATE events SET repeat = ? WHERE id = 1", arrayOf(invalid))
+            }
+        }
+        assertEquals(Repeat.entries.toSet(), store.events().map { it.repeat }.toSet())
+    }
+
+    @Test fun `indexed epoch timestamps return only due events and are cleared after notification`() {
+        val now = Instant.parse("2026-10-20T09:30:00Z")
+        val id = store.saveEvent(Event(title = "Due", start = first.plusDays(1).atTime(10, 0)))
+        val later = store.saveEvent(Event(title = "Later", start = first.plusDays(1).atTime(11, 0)))
+        store.saveSchedule(store.event(id)!!, 30, now)
+        store.saveSchedule(store.event(later)!!, 30, now.plusSeconds(3600))
+        assertEquals(listOf(id), store.dueEvents(now).map { it.id })
+        helper.readableDatabase.rawQuery("SELECT typeof(next_30m_at), next_30m_at FROM events WHERE id = ?", arrayOf(id.toString())).use {
+            assertTrue(it.moveToFirst()); assertEquals("integer", it.getString(0)); assertEquals(now.epochSecond, it.getLong(1))
+        }
+        helper.readableDatabase.rawQuery("EXPLAIN QUERY PLAN SELECT * FROM events WHERE next_24h_at <= ? OR next_30m_at <= ?", arrayOf(now.epochSecond.toString(), now.epochSecond.toString())).use { cursor ->
+            val plan = buildList { while (cursor.moveToNext()) add(cursor.getString(3)) }.joinToString(" ")
+            assertTrue(plan, plan.contains("events_next_24h")); assertTrue(plan, plan.contains("events_next_30m"))
+        }
+        assertTrue(store.markNotified(store.event(id)!!, Reminder(first.plusDays(1).atTime(10, 0), now), 30))
+        assertTrue(store.dueEvents(now).isEmpty())
+    }
+
+    @Test fun `reminder claims reject old versions and older occurrences after a clock rollback`() {
+        val at = first.atTime(10, 0)
+        val id = store.saveEvent(Event(title = "Daily", start = at, repeat = Repeat.DAILY))
+        val event = store.event(id)!!
+        saveSchedule(event, 30, at.plusDays(1))
+        assertFalse(markNotified(id, event.version + 1, at.plusDays(1), 30))
+        assertTrue(markNotified(id, event.version, at.plusDays(1), 30))
+        saveSchedule(event, 30, at)
+        assertFalse(markNotified(id, event.version, at, 30))
+        assertEquals(at.plusDays(1), store.event(id)!!.notified30m)
+    }
+
+    @Test fun `schedule edits reset reminder state but title edits retain the processed occurrence`() {
+        val at = first.atTime(10, 0)
+        val id = store.saveEvent(Event(title = "Daily", start = at, repeat = Repeat.DAILY))
+        saveSchedule(store.event(id)!!, 30, at)
+        assertTrue(markNotified(id, 1, at, 30))
+        store.saveEvent(store.event(id)!!.copy(title = "Daily renamed"))
+        assertEquals(at, store.event(id)!!.notified30m)
+        saveSchedule(store.event(id)!!, 1440, at.plusDays(1))
+        store.saveEvent(store.event(id)!!.copy(start = at.minusHours(1)))
+        assertNull(store.event(id)!!.notified30m)
+        assertNull(store.event(id)!!.next24h)
+    }
+
+    @Test fun `pending reminders and processed occurrence survive reopening`() {
+        val at = first.atTime(10, 0)
+        val id = store.saveEvent(Event(title = "Exam", start = at))
+        saveSchedule(store.event(id)!!, 1440, at)
+        saveSchedule(store.event(id)!!, 30, at)
+        assertTrue(markNotified(id, 1, at, 1440))
+        helper.close()
+        helper = DaymarkDatabase(ApplicationProvider.getApplicationContext(), "test.db")
+        store = DaymarkStore(helper)
+        assertEquals(at, store.event(id)!!.notified24h)
+        assertEquals(reminder(at, 30).trigger, store.event(id)!!.next30m)
+        assertNull(store.event(id)!!.next24h)
     }
 
     @Test fun `SQLite survives closing and reopening the app store`() {

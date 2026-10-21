@@ -68,4 +68,18 @@ class EventRulesTest {
         assertNotNull(EventRules.onDay(event, LocalDate.parse("2026-10-20")))
         assertNull(EventRules.onDay(event, LocalDate.parse("2026-10-19")))
     }
+
+    @Test fun `processed occurrence is skipped after clock rollback without suppressing the other lead`() {
+        val event = event("2026-10-19T09:00", Repeat.DAILY).copy(notified24h = LocalDateTime.parse("2026-10-22T09:00"))
+        val now = Instant.parse("2026-10-20T08:00:00Z")
+        assertEquals(LocalDateTime.parse("2026-10-23T09:00"), EventRules.nextReminder(event, 1440, now, ZoneOffset.UTC)?.occurrence)
+        assertEquals(LocalDateTime.parse("2026-10-20T09:00"), EventRules.nextReminder(event, 30, now, ZoneOffset.UTC)?.occurrence)
+    }
+
+    @Test fun `notified one-time lead is finished while the other lead can still be scheduled`() {
+        val event = event("2026-10-20T09:00", Repeat.ONCE).copy(notified24h = LocalDateTime.parse("2026-10-20T09:00"))
+        val now = Instant.parse("2026-10-18T08:00:00Z")
+        assertNull(EventRules.nextReminder(event, 1440, now, ZoneOffset.UTC))
+        assertNotNull(EventRules.nextReminder(event, 30, now, ZoneOffset.UTC))
+    }
 }
