@@ -25,11 +25,18 @@ data class Event(
     val start: LocalDateTime,
     val repeat: Repeat = Repeat.ONCE,
     val version: Long = 1,
-)
+    // Pending reminders are absolute trigger instants; notified markers identify local occurrences.
+    val next24h: Instant? = null,
+    val next30m: Instant? = null,
+    val notified24h: LocalDateTime? = null,
+    val notified30m: LocalDateTime? = null,
+) {
+    fun pendingReminder(lead: Long) = when (lead) { 1440L -> next24h; 30L -> next30m; else -> error("Invalid reminder lead") }
+    fun notifiedOccurrence(lead: Long) = when (lead) { 1440L -> notified24h; 30L -> notified30m; else -> error("Invalid reminder lead") }
+}
 
 data class Occurrence(val event: Event, val at: LocalDateTime)
 data class Reminder(val occurrence: LocalDateTime, val trigger: Instant)
-data class ScheduledReminder(val eventId: Long, val lead: Long, val occurrence: LocalDateTime, val version: Long)
 
 /** Recurrences are calculated from the original anchor, so Jan 31 -> Feb 28 -> Mar 31. */
 object EventRules {
@@ -61,8 +68,10 @@ object EventRules {
     /** Leads are elapsed durations (24 h / 30 min), including across DST boundaries. */
     fun nextReminder(event: Event, leadMinutes: Long, now: Instant, zone: ZoneId): Reminder? {
         val threshold = now.plusSeconds(leadMinutes * 60)
+        val last = event.notifiedOccurrence(leadMinutes)
         // Start a day earlier to include both sides of a daylight-saving overlap.
-        var candidate = next(event, threshold.atZone(zone).toLocalDate().minusDays(1).atStartOfDay())
+        val from = threshold.atZone(zone).toLocalDate().minusDays(1).atStartOfDay()
+        var candidate = next(event, if (last != null && last >= from) last.plusMinutes(1) else from)
         while (candidate != null) {
             val trigger = candidate.atZone(zone).toInstant().minusSeconds(leadMinutes * 60)
             if (trigger > now) return Reminder(candidate, trigger)

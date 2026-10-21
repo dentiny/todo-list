@@ -111,4 +111,53 @@ class ReminderSchedulerTest {
         assertTrue(shadowOf(manager).allNotifications.isEmpty())
         assertEquals(2, alarms.size) // 30-minute reminder and next midnight
     }
+
+    @Test fun `duplicate callbacks remain ignored after reopening and dismissing the notification`() {
+        shadowOf(context as Application).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val manager = context.getSystemService(NotificationManager::class.java)
+        shadowOf(manager).setNotificationsEnabled(true)
+        val id = store.saveEvent(Event(title = "Exam", start = LocalDateTime.parse("2026-10-19T08:30")))
+        scheduler.refresh(now.minusSeconds(60), ZoneOffset.UTC)
+        val intent = Intent().putExtra("event_id", id).putExtra("lead", 30L).putExtra("version", 1L).putExtra("occurrence", "2026-10-19T08:30")
+        scheduler.receive(intent, now)
+        assertEquals(1, shadowOf(manager).allNotifications.size)
+        manager.cancelAll()
+        helper.close()
+        helper = DaymarkDatabase(context, "reminders-test.db")
+        store = DaymarkStore(helper)
+        scheduler = ReminderScheduler(context, store)
+        scheduler.receive(intent, now.plusSeconds(30))
+        assertTrue(shadowOf(manager).allNotifications.isEmpty())
+        assertEquals(LocalDateTime.parse("2026-10-19T08:30"), store.event(id)!!.notified30m)
+    }
+
+    @Test fun `daily events independently notify today's 30-minute and tomorrow's 24-hour occurrences`() {
+        shadowOf(context as Application).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val manager = context.getSystemService(NotificationManager::class.java)
+        shadowOf(manager).setNotificationsEnabled(true)
+        val id = store.saveEvent(Event(title = "Daily", start = LocalDateTime.parse("2026-10-19T09:00"), repeat = Repeat.DAILY))
+        scheduler.refresh(now, ZoneOffset.UTC)
+        scheduler.refresh(now.plusSeconds(1800), ZoneOffset.UTC)
+        scheduler.refresh(now.plusSeconds(3600), ZoneOffset.UTC)
+        assertEquals(2, shadowOf(manager).allNotifications.size)
+        val event = store.event(id)!!
+        assertEquals(LocalDateTime.parse("2026-10-19T09:00"), event.notified30m)
+        assertEquals(LocalDateTime.parse("2026-10-20T09:00"), event.notified24h)
+        assertEquals(Instant.parse("2026-10-20T08:30:00Z"), event.next30m)
+        assertEquals(Instant.parse("2026-10-20T09:00:00Z"), event.next24h)
+    }
+
+    @Test fun `title-only edits do not notify an already processed occurrence again`() {
+        shadowOf(context as Application).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val manager = context.getSystemService(NotificationManager::class.java)
+        shadowOf(manager).setNotificationsEnabled(true)
+        val id = store.saveEvent(Event(title = "Exam", start = LocalDateTime.parse("2026-10-19T08:30")))
+        scheduler.refresh(now.minusSeconds(60), ZoneOffset.UTC)
+        scheduler.refresh(now, ZoneOffset.UTC)
+        manager.cancelAll()
+        store.saveEvent(store.event(id)!!.copy(title = "Exam renamed"))
+        scheduler.refresh(now.minusSeconds(60), ZoneOffset.UTC)
+        scheduler.refresh(now, ZoneOffset.UTC)
+        assertTrue(shadowOf(manager).allNotifications.isEmpty())
+    }
 }
