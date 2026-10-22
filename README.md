@@ -7,7 +7,7 @@ A quiet Android planner for daily priorities, upcoming events, and a record of y
 ## Design principles
 
 - **Put the day first.** Must-do tasks and the next event come before decoration. A compact header leaves room for the work itself.
-- **Keep optional things optional.** P0 carries forward automatically; P1 and P2 move only when you choose. An unfinished nice-to-do does not become an obligation.
+- **Keep priorities clear.** P0 is a must-do; P1 and P2 are nice to do. Every unfinished task carries forward until it is completed, marked stale, or deleted.
 - **Make calm useful.** Warm paper, forest green, serif headings, and simple icons create a consistent visual language. Clear labels and restrained spacing keep it practical.
 - **Respect attention and intent.** Add or complete a task in a few taps. Protect unsaved changes, preserve edits through rotation, and let layouts adapt to larger system text.
 - **Stay private and lightweight.** Local SQLite, native Android components, and a small set of vector icons keep the app independent of accounts, servers, and heavy assets.
@@ -21,7 +21,7 @@ A quiet Android planner for daily priorities, upcoming events, and a record of y
     <th>Journal</th>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/today.png" alt="Today with a compact event preview, P0 tasks, and optional carry-over review" width="250"></td>
+    <td><img src="docs/screenshots/today.png" alt="Today with a compact event preview and automatically carried daily priorities" width="250"></td>
     <td><img src="docs/screenshots/events.png" alt="Upcoming events with their exact times and recurrence" width="250"></td>
     <td><img src="docs/screenshots/journal.png" alt="Journal with daily open, completed, carried, and stale task counts" width="250"></td>
   </tr>
@@ -43,13 +43,12 @@ Each day has three task sections and an Events section:
 | Priority | Meaning | Unfinished tasks |
 | --- | --- | --- |
 | **P0** | Must do | Automatically carried to the next day |
-| **P1** | Nice to do | You choose whether to carry them forward |
-| **P2** | If there is room | You choose whether to carry them forward |
+| **P1** | Nice to do | Automatically carried to the next day |
+| **P2** | If there is room | Automatically carried to the next day |
 
 - Add, edit, delete, complete, or mark a task **Stale**. Switch freely between P0, P1, and P2.
 - **Stale** means no longer needed: the record stays in history and stops carrying forward. Deletion removes that day's entry.
-- Days change at **midnight in your phone's local time**. Unfinished P0 tasks catch up to today even after several days away.
-- **Review carry-over** lets you move older P1/P2 tasks to today individually or in bulk, or keep them in history. Unreviewed tasks remain available later.
+- Days change at **midnight in your phone's local time**. Unfinished P0, P1, and P2 tasks catch up to today even after several days away.
 - Tap the date to open the calendar. **Journal** shows previous days with open, completed, carried, and stale counts, including quiet days.
 
 ### Events and reminders

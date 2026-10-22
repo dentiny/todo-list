@@ -16,7 +16,6 @@ data class Task(
     val day: LocalDate,
     val originDay: LocalDate = day,
     val movedTo: LocalDate? = null,
-    val reviewDismissed: Boolean = false,
 )
 
 data class Event(

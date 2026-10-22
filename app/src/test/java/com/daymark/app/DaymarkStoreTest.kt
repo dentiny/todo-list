@@ -32,69 +32,71 @@ class DaymarkStoreTest {
         store.markNotified(Event(id = id, title = "", start = at, version = version), reminder(at, lead), lead)
 
 
-    @Test fun `P0 carries through every missed day and rollover is idempotent`() {
-        store.addTask("Prepare for exam", Priority.P0, first)
+    @Test fun `all priorities carry through every missed day and rollover is idempotent`() {
+        Priority.entries.forEach { store.addTask("Task ${it.name}", it, first) }
+        val roots = store.tasks(first).associate { it.priority to it.rootId }
         val today = first.plusDays(4)
         repeat(3) { store.rollOver(today) }
-        assertEquals(5, store.allTasks().size)
-        assertEquals(1, store.allTasks().count { it.status == TaskStatus.OPEN })
-        (0L..3L).forEach { offset ->
-            val snapshot = store.tasks(first.plusDays(offset)).single()
-            assertEquals(TaskStatus.MOVED, snapshot.status)
-            assertEquals(first.plusDays(offset + 1), snapshot.movedTo)
+        assertEquals(15, store.allTasks().size)
+        assertEquals(3, store.allTasks().count { it.status == TaskStatus.OPEN })
+        (0L..4L).forEach { offset ->
+            val snapshots = store.tasks(first.plusDays(offset))
+            assertEquals(Priority.entries.toSet(), snapshots.map { it.priority }.toSet())
+            snapshots.forEach { snapshot ->
+                assertEquals(roots[snapshot.priority], snapshot.rootId)
+                assertEquals("Task ${snapshot.priority.name}", snapshot.title)
+                assertEquals(first, snapshot.originDay)
+                assertEquals(if (offset == 4L) TaskStatus.OPEN else TaskStatus.MOVED, snapshot.status)
+                assertEquals(if (offset == 4L) null else first.plusDays(offset + 1), snapshot.movedTo)
+            }
         }
-        assertEquals(first, store.tasks(today).single().originDay)
     }
 
-    @Test fun `done and stale tasks never carry over`() {
-        listOf(TaskStatus.DONE, TaskStatus.STALE).forEach { status ->
-            store.addTask(status.name, Priority.P0, first)
-            val task = store.tasks(first).last()
-            store.updateTask(task.copy(status = status), first)
+    @Test fun `done and stale tasks never carry over for any priority`() {
+        Priority.entries.forEach { priority ->
+            listOf(TaskStatus.DONE, TaskStatus.STALE).forEach { status ->
+                val id = store.addTask("${priority.name} ${status.name}", priority, first)
+                val task = store.tasks(first).single { it.id == id }
+                store.updateTask(task.copy(status = status), first)
+            }
         }
         store.rollOver(first.plusDays(7))
-        assertEquals(2, store.allTasks().size)
+        assertEquals(6, store.allTasks().size)
         assertTrue(store.tasks(first.plusDays(7)).isEmpty())
     }
 
-    @Test fun `optional tasks wait indefinitely for explicit selection`() {
-        val a = store.addTask("Read", Priority.P1, first)
-        val b = store.addTask("Walk", Priority.P2, first)
-        val today = first.plusDays(5)
-        store.rollOver(today)
-        assertEquals(setOf(a, b), store.pending(today).map { it.id }.toSet())
-        store.carry(setOf(a), today)
-        assertEquals(listOf(b), store.pending(today).map { it.id })
-        assertEquals("Read", store.tasks(today).single().title)
-        store.carry(setOf(a), today)
-        assertEquals(1, store.tasks(today).size)
+    @Test fun `changing an overdue task to any priority preserves automatic carry-over`() {
+        Priority.entries.forEach { priority ->
+            val id = store.addTask("Change to ${priority.name}", Priority.P1, first)
+            val task = store.tasks(first).single { it.id == id }
+            store.updateTask(task.copy(priority = priority), first.plusDays(2))
+            val carried = store.tasks(first.plusDays(2)).single { it.rootId == task.rootId }
+            assertEquals(priority, carried.priority)
+            assertEquals(TaskStatus.OPEN, carried.status)
+            assertEquals(first, carried.originDay)
+        }
+        assertEquals(9, store.allTasks().size)
     }
 
-    @Test fun `keeping in history dismisses review but allows carrying later`() {
-        val id = store.addTask("Visit a museum", Priority.P2, first)
-        store.dismiss(setOf(id))
-        assertTrue(store.pending(first.plusDays(3)).isEmpty())
-        assertEquals(TaskStatus.OPEN, store.tasks(first).single().status)
-        store.carry(setOf(id), first.plusDays(4))
-        assertEquals(TaskStatus.OPEN, store.tasks(first.plusDays(4)).single().status)
+    @Test fun `completing or staling carried tasks stops further carry-over`() {
+        Priority.entries.forEach { store.addTask("Task ${it.name}", it, first) }
+        val nextDay = first.plusDays(1)
+        store.rollOver(nextDay)
+        store.tasks(nextDay).forEach { task ->
+            store.updateTask(task.copy(status = if (task.priority == Priority.P2) TaskStatus.STALE else TaskStatus.DONE), nextDay)
+        }
+        store.rollOver(nextDay.plusDays(3))
+        assertEquals(6, store.allTasks().size)
+        assertTrue(store.tasks(nextDay.plusDays(3)).isEmpty())
     }
 
-    @Test fun `changing an old P1 to P0 immediately applies automatic carry-over`() {
-        store.addTask("Important now", Priority.P1, first)
-        val task = store.tasks(first).single()
-        store.updateTask(task.copy(priority = Priority.P0), first.plusDays(2))
-        assertEquals(Priority.P0, store.tasks(first.plusDays(2)).single().priority)
-        assertEquals(3, store.allTasks().size)
-        assertTrue(store.pending(first.plusDays(2)).isEmpty())
-    }
-
-    @Test fun `changing P0 to P2 stops automatic carry-over`() {
+    @Test fun `changing P0 to P2 retains automatic carry-over`() {
         store.addTask("Less urgent now", Priority.P0, first)
         val task = store.tasks(first).single()
         store.updateTask(task.copy(priority = Priority.P2), first)
         store.rollOver(first.plusDays(1))
-        assertTrue(store.tasks(first.plusDays(1)).isEmpty())
-        assertEquals(Priority.P2, store.pending(first.plusDays(1)).single().priority)
+        assertEquals(Priority.P2, store.tasks(first.plusDays(1)).single().priority)
+        assertEquals(task.rootId, store.tasks(first.plusDays(1)).single().rootId)
     }
 
     @Test fun `P1 and P2 can switch without losing status or title`() {
@@ -123,12 +125,11 @@ class DaymarkStoreTest {
         assertEquals(1, store.tasks(first).size)
     }
 
-    @Test fun `future tasks are not brought forward or put in pending review`() {
-        store.addTask("Later", Priority.P0, first.plusDays(3))
-        store.addTask("Also later", Priority.P1, first.plusDays(3))
+    @Test fun `future tasks of all priorities are not brought forward`() {
+        Priority.entries.forEach { store.addTask("Later ${it.name}", it, first.plusDays(3)) }
         store.rollOver(first)
         assertTrue(store.tasks(first).isEmpty())
-        assertTrue(store.pending(first).isEmpty())
+        assertEquals(3, store.tasks(first.plusDays(3)).size)
     }
 
     @Test fun `event edits invalidate old alarms and deleting an event removes its reminder state`() {

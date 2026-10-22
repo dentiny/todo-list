@@ -40,10 +40,6 @@ class DaymarkStore(private val helper: DaymarkDatabase) {
 
     @Synchronized fun tasks(day: LocalDate): List<Task> = queryTasks("day = ?", arrayOf(day.toString()))
     @Synchronized fun allTasks(): List<Task> = queryTasks("1", emptyArray())
-    @Synchronized fun pending(today: LocalDate): List<Task> = queryTasks(
-        "day < ? AND status = 'OPEN' AND priority != 'P0' AND review_dismissed = 0", arrayOf(today.toString())
-    )
-
     @Synchronized fun addTask(title: String, priority: Priority, day: LocalDate): Long {
         require(title.isNotBlank())
         return insert(Task(rootId = UUID.randomUUID().toString(), title = title.trim(), priority = priority, day = day))
@@ -65,26 +61,16 @@ class DaymarkStore(private val helper: DaymarkDatabase) {
 
     private fun rollOverInternal(today: LocalDate) {
         // Persist a snapshot for every missed day, not only the day the app is reopened.
-        val overdue = queryTasks("day < ? AND status = 'OPEN' AND priority = 'P0'", arrayOf(today.toString()))
+        val overdue = queryTasks("day < ? AND status = 'OPEN'", arrayOf(today.toString()))
         for (task in overdue) {
             var current = task
             while (current.day < today) current = moveInternal(current, current.day.plusDays(1))
         }
     }
 
-    @Synchronized fun carry(ids: Set<Long>, today: LocalDate) = transaction {
-        ids.forEach { id ->
-            findTask(id)?.takeIf { it.day < today && it.status == TaskStatus.OPEN }?.let { moveInternal(it, today) }
-        }
-    }
-
-    @Synchronized fun dismiss(ids: Set<Long>) = transaction {
-        ids.forEach { id -> db.execSQL("UPDATE tasks SET review_dismissed = 1 WHERE id = ? AND status = 'OPEN'", arrayOf(id)) }
-    }
-
     private fun moveInternal(task: Task, to: LocalDate): Task {
         db.execSQL("UPDATE tasks SET status = 'MOVED', moved_to = ? WHERE id = ?", arrayOf<Any>(to.toString(), task.id))
-        val next = task.copy(id = 0, day = to, movedTo = null, reviewDismissed = false)
+        val next = task.copy(id = 0, day = to, movedTo = null)
         return next.copy(id = insert(next))
     }
 
@@ -140,7 +126,7 @@ class DaymarkStore(private val helper: DaymarkDatabase) {
     private fun taskValues(task: Task) = ContentValues().apply {
         put("root_id", task.rootId); put("title", task.title); put("priority", task.priority.name)
         put("status", task.status.name); put("day", task.day.toString()); put("origin_day", task.originDay.toString())
-        put("moved_to", task.movedTo?.toString()); put("review_dismissed", if (task.reviewDismissed) 1 else 0)
+        put("moved_to", task.movedTo?.toString())
     }
     private fun queryTasks(where: String, args: Array<String>): List<Task> = db.rawQuery(
         "SELECT * FROM tasks WHERE $where ORDER BY day DESC, id ASC", args
@@ -154,7 +140,6 @@ class DaymarkStore(private val helper: DaymarkDatabase) {
         priority = Priority.valueOf(text("priority")), status = TaskStatus.valueOf(text("status")),
         day = LocalDate.parse(text("day")), originDay = LocalDate.parse(text("origin_day")),
         movedTo = getString(getColumnIndexOrThrow("moved_to"))?.let(LocalDate::parse),
-        reviewDismissed = getInt(getColumnIndexOrThrow("review_dismissed")) != 0,
     )
     private fun Cursor.event() = Event(
         id = getLong(getColumnIndexOrThrow("id")), title = text("title"), start = LocalDateTime.parse(text("start")),

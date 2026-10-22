@@ -8,6 +8,7 @@ import androidx.lifecycle.ViewModelProvider
 import com.daymark.app.ui.DaymarkViewModel
 import com.daymark.app.domain.*
 import org.junit.Assert.*
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -25,6 +26,20 @@ class AppInteractionTest {
     // Read the same store as the UI rather than a different activity Application's store.
     private fun uiApp() = compose.runOnIdle {
         ViewModelProvider(compose.activity)[DaymarkViewModel::class.java].getApplication<DaymarkApplication>().daymark
+    }
+
+    @Before fun clearEntries() {
+        val app = uiApp()
+        val model = ViewModelProvider(compose.activity)[DaymarkViewModel::class.java]
+        compose.runOnIdle {
+            app.store.allTasks().forEach { app.store.deleteTask(it.id) }
+            app.store.events().forEach { app.scheduler.delete(it.id) }
+            model.refresh()
+        }
+        compose.waitUntil(10_000) {
+            val state = model.state.value
+            !state.loading && state.allTasks.isEmpty() && state.events.isEmpty()
+        }
     }
 
     @Test fun `create a task complete it and change its priority`() {
@@ -125,4 +140,25 @@ class AppInteractionTest {
         val app = uiApp()
         assertTrue(compose.runOnIdle { app.store.allTasks().isEmpty() })
     }
+    @Test fun `overdue P1 and P2 appear in today without a carry-over review`() {
+        val store = uiApp().store
+        val today = java.time.LocalDate.now()
+        compose.runOnIdle {
+            Priority.entries.forEach { store.addTask("Carry ${it.name}", it, today.minusDays(2)) }
+            ViewModelProvider(compose.activity)[DaymarkViewModel::class.java].refresh()
+        }
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("Carry P0").fetchSemanticsNodes().isNotEmpty()
+        }
+        Priority.entries.forEach { priority ->
+            compose.onNodeWithTag("day-list").performScrollToNode(hasText("Carry ${priority.name}"))
+            compose.onNodeWithText("Carry ${priority.name}").assertIsDisplayed()
+        }
+        assertEquals(Priority.entries.toSet(), compose.runOnIdle { store.tasks(today).map { it.priority }.toSet() })
+        compose.onNodeWithText("Review carry-over", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Carry P2").performClick()
+        compose.onNodeWithText("If there's room. Unfinished tasks carry into the next day automatically.").assertExists()
+        compose.onNodeWithText("Move to today").assertDoesNotExist()
+    }
+
 }
