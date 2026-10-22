@@ -21,7 +21,6 @@ data class DaymarkState(
     val selected: LocalDate = today,
     val tasks: List<Task> = emptyList(),
     val allTasks: List<Task> = emptyList(),
-    val pending: List<Task> = emptyList(),
     val events: List<Event> = emptyList(),
     val notificationsAllowed: Boolean = false,
     val exactAllowed: Boolean = false,
@@ -56,7 +55,7 @@ class DaymarkViewModel(application: Application) : AndroidViewModel(application)
                         val selected = if (old.selected == old.today) today else old.selected
                         mutable.value = old.copy(
                             today = today, selected = selected, tasks = app.store.tasks(selected),
-                            allTasks = app.store.allTasks(), pending = app.store.pending(today), events = app.store.events(),
+                            allTasks = app.store.allTasks(), events = app.store.events(),
                             notificationsAllowed = app.scheduler.notificationsAllowed, exactAllowed = app.scheduler.exactAllowed,
                             loading = false, editorSaving = if (editor) false else old.editorSaving,
                             editorSaved = editor || old.editorSaved,
@@ -80,13 +79,6 @@ class DaymarkViewModel(application: Application) : AndroidViewModel(application)
     fun addTask(title: String, priority: Priority, day: LocalDate) = runOperation(editor = true) { app.store.addTask(title, priority, day) }
     fun updateTask(task: Task, fromEditor: Boolean = false) = runOperation(editor = fromEditor) { app.store.updateTask(task, LocalDate.now()) }
     fun deleteTask(id: Long) = runOperation(editor = true) { app.store.deleteTask(id) }
-    fun carry(ids: Set<Long>) = runOperation { app.store.carry(ids, LocalDate.now()) }
-    fun saveAndCarry(task: Task) = runOperation(editor = true) {
-        val today = LocalDate.now()
-        app.store.updateTask(task, today)
-        app.store.carry(setOf(task.id), today)
-    }
-    fun dismiss(ids: Set<Long>) = runOperation { app.store.dismiss(ids) }
     fun saveEvent(event: Event) = runOperation(editor = true) { app.scheduler.save(event) }
     fun deleteEvent(id: Long) = runOperation(editor = true) { app.scheduler.delete(id) }
     fun clearEditorResult() { mutable.update { it.copy(editorSaved = false, editorError = null) } }

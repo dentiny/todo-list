@@ -22,7 +22,7 @@ import java.time.*
 
 @Composable fun TaskEditor(
     task: Task?, initialPriority: Priority, day: LocalDate, onDismiss: () -> Unit,
-    onSave: (String, Priority, TaskStatus) -> Unit, onDelete: () -> Unit, onCarry: (String, Priority, TaskStatus) -> Unit, today: LocalDate,
+    onSave: (String, Priority, TaskStatus) -> Unit, onDelete: () -> Unit,
     saving: Boolean = false, error: String? = null,
 ) {
     var title by rememberSaveable(task?.id) { mutableStateOf(task?.title ?: "") }
@@ -43,7 +43,7 @@ import java.time.*
                 Priority.entries.forEach { p -> FilterChip(selected = p == priority, onClick = { priority = p }, enabled = !moved && !saving,
                     label = { Text(p.name) }, leadingIcon = { Icon(painterResource(R.drawable.ic_flag), null, tint = p.color(), modifier = Modifier.size(16.dp)) }) }
             }
-            Text(when (priority) { Priority.P0 -> "Must do. Unfinished tasks carry into the next day automatically."; else -> "Nice to do. You choose whether to bring it into the next day." }, color = Muted, style = MaterialTheme.typography.bodyMedium)
+            Text("${priority.subtitle}. Unfinished tasks carry into the next day automatically.", color = Muted, style = MaterialTheme.typography.bodyMedium)
             if (task != null && !moved) {
                 Text("STATUS", color = Muted, style = MaterialTheme.typography.labelSmall)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -58,9 +58,6 @@ import java.time.*
                 Text("This is a historical snapshot. The task was carried to ${task?.movedTo?.label("MMMM d, yyyy")}.", color = Muted)
                 OutlinedButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("Close") }
             } else Button(onClick = { onSave(title.trim(), priority, status) }, enabled = title.isNotBlank() && !saving, modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)) { Text(if (saving) "Saving…" else if (task == null) "Add task" else "Save changes") }
-            if (task != null && task.day < today && task.status == TaskStatus.OPEN) {
-                OutlinedButton(onClick = { onCarry(title.trim(), priority, status) }, enabled = title.isNotBlank() && status == TaskStatus.OPEN && !saving, modifier = Modifier.fillMaxWidth()) { Text("Move to today") }
-            }
             if (task != null) TextButton(onClick = { confirmDelete = true }, enabled = !saving, modifier = Modifier.fillMaxWidth()) { Text("Delete task", color = Clay) }
         }
     }

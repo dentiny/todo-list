@@ -9,8 +9,7 @@ CREATE TABLE tasks (
     status TEXT NOT NULL CHECK(status IN ('OPEN','DONE','STALE','MOVED')),
     day TEXT NOT NULL,
     origin_day TEXT NOT NULL,
-    moved_to TEXT,
-    review_dismissed INTEGER NOT NULL DEFAULT 0
+    moved_to TEXT
 );
 
 -- Look up a day's tasks.

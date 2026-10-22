@@ -10,7 +10,6 @@ import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -139,7 +138,6 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
                 ?: model.addTask(title, priority, LocalDate.parse(taskDay))
         },
         onDelete = { editingTask?.let { model.deleteTask(it.id) } },
-        onCarry = { title, priority, status -> editingTask?.let { model.saveAndCarry(it.copy(title = title, priority = priority, status = status)) } }, today = state.today,
         saving = state.editorSaving, error = state.editorError,
     )
     if (eventOpen && !state.loading && !missingItem && !state.editorSaved) EventEditor(editingEvent, onDismiss = { eventOpen = false },
@@ -230,9 +228,6 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
                     HorizontalDivider(color = Line)
                 }
             }
-            if (priority == Priority.P0 && isToday && state.pending.isNotEmpty()) item(key = "carry-review") {
-                PendingReview(state.pending, editTask, model::carry, model::dismiss)
-            }
         }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -264,39 +259,6 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
             detail?.let { Text(it, color = Muted, style = MaterialTheme.typography.labelMedium) }
         }
         Icon(painterResource(R.drawable.ic_more_horiz), null, tint = Muted, modifier = Modifier.padding(12.dp).size(20.dp))
-    }
-}
-
-@Composable private fun PendingReview(tasks: List<Task>, edit: (Task) -> Unit, carry: (Set<Long>) -> Unit, dismiss: (Set<Long>) -> Unit) {
-    var expanded by rememberSaveable { mutableStateOf(false) }
-    var selection by remember { mutableStateOf(emptySet<Long>()) }
-    val ids = tasks.map { it.id }.toSet()
-    val selected = selection.intersect(ids)
-    Surface(color = Color(0xFFF0EADF), shape = RoundedCornerShape(20.dp), modifier = Modifier.animateContentSize()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(onClickLabel = if (expanded) "Collapse carry-over review" else "Review carry-over tasks") { expanded = !expanded }
-                .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" }, verticalAlignment = Alignment.CenterVertically) {
-                Icon(painterResource(R.drawable.ic_history), null, tint = Olive, modifier = Modifier.padding(end = 12.dp))
-                Text("Review carry-over (${tasks.size})", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                Icon(painterResource(if (expanded) R.drawable.ic_expand_less else R.drawable.ic_expand_more), null)
-            }
-            if (expanded) {
-                Text("Bring what still matters into today.", color = Muted, style = MaterialTheme.typography.bodyMedium)
-                TextButton(onClick = { selection = if (selected == ids) emptySet() else ids }) { Text(if (selected == ids) "Deselect all" else "Select all") }
-                tasks.forEach { task ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(checked = task.id in selected, onCheckedChange = { selection = if (it) selection + task.id else selection - task.id }, modifier = Modifier.semantics { contentDescription = "Select ${task.title} for carry-over" })
-                        Column(Modifier.weight(1f).clickable { edit(task) }.padding(vertical = 8.dp)) {
-                            Text(task.title, style = MaterialTheme.typography.bodyMedium)
-                            Text("${task.priority.name} · ${task.day.label("MMM d")}", color = Muted, style = MaterialTheme.typography.labelMedium)
-                        }
-                        IconButton(onClick = { edit(task) }) { Icon(painterResource(R.drawable.ic_more_horiz), "Edit ${task.title}", tint = Muted) }
-                    }
-                }
-                Button(onClick = { carry(selected); selection = emptySet() }, enabled = selected.isNotEmpty(), modifier = Modifier.fillMaxWidth()) { Text("Move to today${if (selected.isEmpty()) "" else " (${selected.size})"}") }
-                TextButton(onClick = { dismiss(selected); selection = emptySet() }, enabled = selected.isNotEmpty(), modifier = Modifier.fillMaxWidth()) { Text("Keep in history") }
-            }
-        }
     }
 }
 
