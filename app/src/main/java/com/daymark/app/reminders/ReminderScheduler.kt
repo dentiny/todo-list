@@ -20,6 +20,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 class ReminderScheduler(private val context: Context, private val store: DaymarkStore) {
+    private var stopped = false
     private val alarms get() = context.getSystemService(AlarmManager::class.java)
     val exactAllowed get() = Build.VERSION.SDK_INT < 31 || alarms.canScheduleExactAlarms()
     val notificationsAllowed get() = NotificationManagerCompat.from(context).areNotificationsEnabled() &&
@@ -33,7 +34,8 @@ class ReminderScheduler(private val context: Context, private val store: Daymark
         )
     }
 
-    @Synchronized fun refresh(now: Instant = Instant.now(), zone: ZoneId = ZoneId.systemDefault()) {
+    @Synchronized fun refresh(now: Instant = Instant.now(), zone: ZoneId = store.zone) {
+        if (stopped) return
         store.rollOver(now.atZone(zone).toLocalDate())
         // Deliver already-due persisted schedules before replacing alarms. This prevents
         // midnight/resume/reboot from cancelling a reminder that Android has not delivered yet.
@@ -58,6 +60,14 @@ class ReminderScheduler(private val context: Context, private val store: Daymark
         store.deleteEvent(eventId)
     }
 
+    @Synchronized fun stop() {
+        if (stopped) return
+        stopped = true
+        store.events().forEach { event -> LEADS.forEach { alarms.cancel(eventIntent(event.id, it)) } }
+        alarms.cancel(midnightIntent())
+        NotificationManagerCompat.from(context).cancelAll()
+    }
+
     private fun schedule(event: Event, lead: Long, now: Instant, zone: ZoneId) {
         val reminder = EventRules.nextReminder(event, lead, now, zone)
         val intent = eventIntent(event.id, lead, event, reminder)
@@ -77,13 +87,16 @@ class ReminderScheduler(private val context: Context, private val store: Daymark
     }
 
     @Synchronized fun receive(intent: Intent, now: Instant = Instant.now()) {
+        if (stopped) return
+        if (intent.getStringExtra("store_id") != store.storageId &&
+            !(intent.getStringExtra("store_id") == null && store.localRollover)) return
         if (intent.action == MIDNIGHT) { refresh(now); return }
         val id = intent.getLongExtra("event_id", -1)
         val lead = intent.getLongExtra("lead", -1)
         val event = store.event(id)
         val at = intent.getStringExtra("occurrence")?.let { runCatching { LocalDateTime.parse(it) }.getOrNull() }
         if (event != null && at != null && lead in LEADS && event.version == intent.getLongExtra("version", -1)) {
-            val zone = ZoneId.systemDefault()
+            val zone = store.zone
             deliverIfDue(event, at, lead, now, zone)
         }
         refresh(now)
@@ -117,13 +130,14 @@ class ReminderScheduler(private val context: Context, private val store: Daymark
         PendingIntent.getBroadcast(context, 0, Intent(context, ReminderReceiver::class.java).apply {
             action = REMINDER
             data = Uri.parse("daymark://reminder/$id/$lead")
+            putExtra("store_id", store.storageId)
             putExtra("event_id", id); putExtra("lead", lead)
             event?.let { putExtra("version", it.version) }
             reminder?.let { putExtra("occurrence", it.occurrence.toString()) }
         }, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
     private fun midnightIntent(): PendingIntent = PendingIntent.getBroadcast(context, 1,
-        Intent(context, ReminderReceiver::class.java).setAction(MIDNIGHT),
+        Intent(context, ReminderReceiver::class.java).setAction(MIDNIGHT).putExtra("store_id", store.storageId),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
     companion object {

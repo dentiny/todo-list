@@ -160,4 +160,28 @@ class ReminderSchedulerTest {
         scheduler.refresh(now, ZoneOffset.UTC)
         assertTrue(shadowOf(manager).allNotifications.isEmpty())
     }
+    @Test fun `remote title edit preserves a due reminder until delivery`() {
+        shadowOf(context as Application).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val manager = context.getSystemService(NotificationManager::class.java)
+        shadowOf(manager).setNotificationsEnabled(true)
+        val event = Event(id = 100, title = "Shared exam", start = LocalDateTime.parse("2026-10-19T08:30"))
+        store.replaceSnapshot(emptyList(), listOf(event))
+        scheduler.refresh(now.minusSeconds(60), ZoneOffset.UTC)
+        store.replaceSnapshot(emptyList(), listOf(event.copy(title = "Renamed", version = 2)))
+        scheduler.refresh(now.plusSeconds(10), ZoneOffset.UTC)
+        assertEquals(1, shadowOf(manager).allNotifications.size)
+        assertEquals(event.start, store.event(100)!!.notified30m)
+    }
+
+    @Test fun `local title edit preserves a due reminder until delivery`() {
+        shadowOf(context as Application).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val manager = context.getSystemService(NotificationManager::class.java)
+        shadowOf(manager).setNotificationsEnabled(true)
+        val id = store.saveEvent(Event(title = "Exam", start = LocalDateTime.parse("2026-10-19T08:30")))
+        scheduler.refresh(now.minusSeconds(60), ZoneOffset.UTC)
+        store.saveEvent(store.event(id)!!.copy(title = "Renamed"))
+        scheduler.refresh(now.plusSeconds(10), ZoneOffset.UTC)
+        assertEquals(1, shadowOf(manager).allNotifications.size)
+    }
+
 }

@@ -2,7 +2,7 @@
 
 **Make room for what matters.**
 
-A quiet Android planner for daily priorities, upcoming events, and a record of your days. Everything stays on your phone.
+A quiet Android planner for daily priorities, upcoming events, and a record of your days. Keep a private local planner, or connect a shared list with Supabase Free.
 
 ## Design principles
 
@@ -10,7 +10,7 @@ A quiet Android planner for daily priorities, upcoming events, and a record of y
 - **Keep priorities clear.** P0 is a must-do; P1 and P2 are nice to do. Every unfinished task carries forward until it is completed, marked stale, or deleted.
 - **Make calm useful.** Warm paper, forest green, serif headings, and simple icons create a consistent visual language. Clear labels and restrained spacing keep it practical.
 - **Respect attention and intent.** Add or complete a task in a few taps. Protect unsaved changes, preserve edits through rotation, and let layouts adapt to larger system text.
-- **Stay private and lightweight.** Local SQLite, native Android components, and a small set of vector icons keep the app independent of accounts, servers, and heavy assets.
+- **Choose what to share.** Original local data stays on the phone. Shared lists use Supabase Auth and PostgreSQL, with isolated SQLite caches and per-device reminder state.
 
 ## Screenshots
 
@@ -54,15 +54,23 @@ Each day has three task sections and an Events section:
 ### Events and reminders
 
 - Create one-time events or repeats that run **daily, weekly, monthly, or yearly**. Every event has a date and a time precise to the minute.
-- Receive two notifications: **24 hours before** and **30 minutes before** each occurrence. Times follow your phone's local time zone.
+- Receive two notifications: **24 hours before** and **30 minutes before** each occurrence. Local events use the phone's time zone; shared events use the shared list's time zone.
 - Today's Events section shows today's occurrences and tomorrow's preview. A compact preview near the top highlights the next event.
 - Monthly and yearly repeats retain their original date: January 31 returns to March 31 after February, and February 29 returns in leap years.
 - Edit or delete an event to update its future reminders. Past one-time events remain available in Events.
 
 Allow notifications and precise reminders through the bell button. Android may delay reminders without precise alarm access; it cannot deliver them while the phone is off or the app is force-stopped.
 
-### Private by default
+### Shared lists (Supabase Free)
 
-Tasks and events live in two app-private SQLite tables on the phone. There is no account, sync, analytics, remote storage, or export. Cloud backup and device transfer are disabled. Uninstalling the app deletes its data.
+Open **Shared lists** to configure your project URL and publishable key, sign in, create a list, or join with an invitation code. Members can edit the same tasks and events. The owner can rotate invitations and remove members. Edits require a connection; saved data is readable offline. The foreground app refreshes every 15 seconds, on resume, and after saves. It does not subscribe to Realtime or sync while closed.
+
+Run `supabase/migrations/202611040001_daymark.sql` once in your own Supabase project first. The app uses its authenticated RPC API; private tables are not exposed. No service-role key belongs in the app.
+
+Original local data can be explicitly imported once into a shared list, including history. The original database remains separate and can still be used locally. Shared tasks roll over on the server using the list's fixed time zone. Shared event times and reminders use that zone; notification delivery state remains local to each device. Concurrent edits use revision checks instead of silently overwriting changes.
+
+### Local data and privacy
+
+Original tasks and events remain in app-private SQLite. Without connecting a shared list, the app works locally. Shared list content is uploaded to your configured Supabase project and is accessible to its members and project administrators. Access and refresh tokens are encrypted with Android Keystore; account/project/list caches are isolated. There is no analytics. Android cloud backup and device transfer remain disabled. Uninstalling the app deletes local data and unsynced state.
 
 The interface is entirely in English. Android 8.0 (API 26) or later is supported.

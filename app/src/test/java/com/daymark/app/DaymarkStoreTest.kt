@@ -239,4 +239,44 @@ class DaymarkStoreTest {
         store = DaymarkStore(helper)
         assertEquals("Remember me", store.tasks(first).single().title)
     }
+    @Test fun `shared snapshots preserve only device-local reminder state for unchanged schedules`() {
+        val at = first.atTime(10, 0)
+        val event = Event(id = 101, title = "Meeting", start = at, repeat = Repeat.DAILY)
+        store.replaceSnapshot(emptyList(), listOf(event))
+        saveSchedule(store.event(101)!!, 30, at)
+        assertTrue(markNotified(101, 1, at, 30))
+        store.replaceSnapshot(emptyList(), listOf(event.copy(title = "Renamed", version = 2)))
+        assertEquals(at, store.event(101)!!.notified30m)
+        assertNull(store.event(101)!!.next30m)
+        store.replaceSnapshot(emptyList(), listOf(event.copy(start = at.plusHours(1), version = 3)))
+        assertNull(store.event(101)!!.notified30m)
+    }
+
+    @Test fun `shared cache does not roll tasks over independently of the server`() {
+        val shared = DaymarkStore(helper, false, ZoneId.of("UTC"))
+        val task = Task(id = 101, rootId = "shared-root", title = "Shared", priority = Priority.P0, day = first, syncVersion = 7)
+        shared.replaceSnapshot(listOf(task), emptyList())
+        shared.rollOver(first.plusDays(4))
+        assertEquals(listOf(task), shared.allTasks())
+    }
+
+    @Test fun `schema upgrade from version one preserves tasks events and reminder markers`() {
+        helper.close()
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.deleteDatabase("test.db")
+        val legacy = context.openOrCreateDatabase("test.db", 0, null)
+        val schema = context.assets.open("0001.sql").bufferedReader().use { it.readText() }
+        schema.lineSequence().filterNot { it.trimStart().startsWith("--") }.joinToString("\n")
+            .split(';').map { it.trim() }.filter { it.isNotEmpty() }.forEach(legacy::execSQL)
+        legacy.execSQL("INSERT INTO tasks(root_id,title,priority,status,day,origin_day) VALUES('legacy','Keep me','P1','OPEN','2026-10-19','2026-10-19')")
+        legacy.execSQL("INSERT INTO events(title,start,repeat,notified_30m) VALUES('Reminder','2026-10-20T10:00','DAILY','2026-10-20T10:00')")
+        legacy.version = 1
+        legacy.close()
+        helper = DaymarkDatabase(context, "test.db")
+        store = DaymarkStore(helper)
+        assertEquals("Keep me", store.allTasks().single().title)
+        assertEquals(1L, store.allTasks().single().syncVersion)
+        assertEquals(LocalDateTime.parse("2026-10-20T10:00"), store.events().single().notified30m)
+    }
+
 }
