@@ -161,4 +161,16 @@ class AppInteractionTest {
         compose.onNodeWithText("Move to today").assertDoesNotExist()
     }
 
+    @Test fun `shared list setup rejects a secret key before making network requests`() {
+        compose.onNodeWithText("Shared lists").performClick()
+        compose.onNode(hasSetTextAction() and hasText("Supabase project URL")).performTextReplacement("https://example.supabase.co")
+        compose.onNode(hasSetTextAction() and hasText("Publishable / anon key")).performTextReplacement("sb_secret_do_not_use")
+        compose.onNodeWithText("Save project").performScrollTo().performClick()
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("Use a publishable key or legacy anon key. Never enter a secret or service_role key.").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText("Use a publishable key or legacy anon key. Never enter a secret or service_role key.").assertExists()
+        assertFalse(uiApp().cloud.signedIn)
+    }
+
 }

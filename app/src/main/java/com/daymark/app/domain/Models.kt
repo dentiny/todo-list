@@ -16,6 +16,7 @@ data class Task(
     val day: LocalDate,
     val originDay: LocalDate = day,
     val movedTo: LocalDate? = null,
+    val syncVersion: Long = 1,
 )
 
 data class Event(

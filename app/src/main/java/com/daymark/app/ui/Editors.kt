@@ -64,9 +64,9 @@ import java.time.*
     if (confirmDelete) DeleteConfirmation("Delete this task?", "This entry will be permanently removed from ${task?.day?.label("MMMM d")}. Other daily snapshots stay in your journal.", { confirmDelete = false }, { confirmDelete = false; onDelete() })
 }
 
-@Composable fun EventEditor(event: Event?, onDismiss: () -> Unit, onSave: (Event) -> Unit, onDelete: () -> Unit, saving: Boolean = false, error: String? = null) {
+@Composable fun EventEditor(event: Event?, onDismiss: () -> Unit, onSave: (Event) -> Unit, onDelete: () -> Unit, saving: Boolean = false, error: String? = null, zone: ZoneId = ZoneId.systemDefault()) {
     val context = LocalContext.current
-    val initialString by rememberSaveable(event?.id) { mutableStateOf((event?.start ?: LocalDateTime.now().plusHours(1).withSecond(0).withNano(0)).toString()) }
+    val initialString by rememberSaveable(event?.id) { mutableStateOf((event?.start ?: LocalDateTime.now(zone).plusHours(1).withSecond(0).withNano(0)).toString()) }
     val initial = LocalDateTime.parse(initialString)
     var title by rememberSaveable(event?.id) { mutableStateOf(event?.title ?: "") }
     var dateString by rememberSaveable(event?.id) { mutableStateOf(initial.toLocalDate().toString()) }
@@ -76,7 +76,7 @@ import java.time.*
     val date = LocalDate.parse(dateString)
     val time = LocalTime.parse(timeString)
     val start = LocalDateTime.of(date, time)
-    val invalidPast = repeat == Repeat.ONCE && start <= LocalDateTime.now() && (event == null || event.start != start)
+    val invalidPast = repeat == Repeat.ONCE && start <= LocalDateTime.now(zone) && (event == null || event.start != start)
 
     val dirty = title != (event?.title ?: "") || start != initial || repeat != (event?.repeat ?: Repeat.ONCE)
     EditorSheet(dirty = dirty, saving = saving, onDismiss = onDismiss) {

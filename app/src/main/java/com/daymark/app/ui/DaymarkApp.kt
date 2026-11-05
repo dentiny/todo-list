@@ -33,6 +33,9 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import com.daymark.app.domain.*
 import kotlinx.coroutines.delay
 import java.time.*
@@ -46,6 +49,8 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
     val state by model.state.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(if (openEvents) "Events" else "Today") }
     var taskOpen by rememberSaveable { mutableStateOf(false) }
+    var editingTaskVersion by rememberSaveable { mutableLongStateOf(1L) }
+    var editingEventVersion by rememberSaveable { mutableLongStateOf(1L) }
     var editingTaskId by rememberSaveable { mutableStateOf<Long?>(null) }
     var taskDay by rememberSaveable { mutableStateOf(state.selected.toString()) }
     var initialPriority by rememberSaveable { mutableStateOf(Priority.P0) }
@@ -53,6 +58,7 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
     var editingEventId by rememberSaveable { mutableStateOf<Long?>(null) }
     val editingTask = state.allTasks.find { it.id == editingTaskId }
     val editingEvent = state.events.find { it.id == editingEventId }
+    var cloudOpen by rememberSaveable { mutableStateOf(false) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var dateOpen by rememberSaveable { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
@@ -62,17 +68,20 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
         if (Build.VERSION.SDK_INT >= 33 && !state.notificationsAllowed) notificationRequest.launch(Manifest.permission.POST_NOTIFICATIONS)
         else context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName))
     }
-    val editTask: (Task) -> Unit = { model.clearEditorResult(); editingTaskId = it.id; initialPriority = it.priority; taskDay = it.day.toString(); taskOpen = true }
+    val editTask: (Task) -> Unit = { model.clearEditorResult(); editingTaskId = it.id; editingTaskVersion = it.syncVersion; initialPriority = it.priority; taskDay = it.day.toString(); taskOpen = true }
     val newTask: (Priority) -> Unit = { model.clearEditorResult(); editingTaskId = null; initialPriority = it; taskDay = state.selected.toString(); taskOpen = true }
-    val editEvent: (Event) -> Unit = { model.clearEditorResult(); editingEventId = it.id; eventOpen = true }
+    val editEvent: (Event) -> Unit = { model.clearEditorResult(); editingEventId = it.id; editingEventVersion = it.version; eventOpen = true }
     val newEvent: () -> Unit = { model.clearEditorResult(); editingEventId = null; eventOpen = true }
 
-    LaunchedEffect(Unit) {
-        while (true) {
-            val now = ZonedDateTime.now()
-            val untilMidnight = Duration.between(now, now.toLocalDate().plusDays(1).atStartOfDay(now.zone)).toMillis()
-            delay(minOf(30_000L, untilMidnight.coerceAtLeast(50L)))
-            model.refresh()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(lifecycle, state.zoneId) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                val now = ZonedDateTime.now(ZoneId.of(state.zoneId))
+                val untilMidnight = Duration.between(now, now.toLocalDate().plusDays(1).atStartOfDay(now.zone)).toMillis()
+                delay(minOf(15_000L, untilMidnight.coerceAtLeast(50L)))
+                model.refresh()
+            }
         }
     }
     LaunchedEffect(state.error) { state.error?.let { snackbar.showSnackbar(it); model.clearError() } }
@@ -116,6 +125,9 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
                 ) { Icon(painterResource(R.drawable.ic_add), if (tab == "Events") "New event" else "New task") }
                 IconButton(onClick = { settingsOpen = true }) { Icon(painterResource(R.drawable.ic_notifications_none), "Reminder settings", tint = Forest) }
             }
+            TextButton(onClick = { cloudOpen = true }, modifier = Modifier.padding(horizontal = 16.dp)) {
+                Text(state.cloud.workspace?.let { "${it.name} · ${state.cloud.syncStatus}" } ?: "Shared lists", maxLines = 2)
+            }
             when {
                 state.loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Forest) }
                 tab == "Events" -> EventsScreen(state, editEvent, newEvent, { settingsOpen = true })
@@ -124,6 +136,8 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
             }
         }
     }
+
+    if (cloudOpen) CloudPanel(state.cloud, model) { cloudOpen = false }
 
     // Wait for SQLite after process restoration; a missing ID must never become a new item.
     val missingItem = !state.loading && !state.editorSaved &&
@@ -134,19 +148,19 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
     if (taskOpen && !state.loading && !missingItem && !state.editorSaved) TaskEditor(editingTask, initialPriority, LocalDate.parse(taskDay),
         onDismiss = { taskOpen = false },
         onSave = { title, priority, status ->
-            editingTask?.let { model.updateTask(it.copy(title = title, priority = priority, status = status), fromEditor = true) }
+            editingTask?.let { model.updateTask(it.copy(title = title, priority = priority, status = status, syncVersion = editingTaskVersion), fromEditor = true) }
                 ?: model.addTask(title, priority, LocalDate.parse(taskDay))
         },
-        onDelete = { editingTask?.let { model.deleteTask(it.id) } },
+        onDelete = { editingTask?.let { model.deleteTask(it.id, editingTaskVersion) } },
         saving = state.editorSaving, error = state.editorError,
     )
     if (eventOpen && !state.loading && !missingItem && !state.editorSaved) EventEditor(editingEvent, onDismiss = { eventOpen = false },
-        onSave = model::saveEvent, onDelete = { editingEvent?.let { model.deleteEvent(it.id) } }, saving = state.editorSaving, error = state.editorError)
+        onSave = { model.saveEvent(if (editingEventId == null) it else it.copy(version = editingEventVersion)) }, onDelete = { editingEvent?.let { model.deleteEvent(it.id, editingEventVersion) } }, saving = state.editorSaving, error = state.editorError, zone = ZoneId.of(state.zoneId))
     if (dateOpen) CalendarDialog(state.selected, { dateOpen = false }) { model.select(it); dateOpen = false }
     if (settingsOpen) ModalBottomSheet(onDismissRequest = { settingsOpen = false }, containerColor = Paper) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).padding(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("A little heads-up.", style = MaterialTheme.typography.headlineMedium)
-            Text("Every event gets two reminders: 24 hours before and 30 minutes before. Times follow your phone's local time zone.", color = Muted)
+            Text("Every event gets two reminders: 24 hours before and 30 minutes before. Event times use ${state.zoneId}.", color = Muted)
             SettingRow("Notifications", if (state.notificationsAllowed) "Enabled" else "Allow Daymark to notify you", state.notificationsAllowed)
             OutlinedButton(onClick = requestNotifications, modifier = Modifier.fillMaxWidth()) { Text(if (state.notificationsAllowed) "Notification settings" else "Enable notifications") }
             SettingRow("Precise reminders", if (state.exactAllowed) "Enabled" else "Allow precise timing in Android settings", state.exactAllowed)
@@ -159,8 +173,8 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
                 }, modifier = Modifier.fillMaxWidth()) { Text("Enable precise reminders") }
             }
             HorizontalDivider(color = Line)
-            Text("Yours, and only yours.", style = MaterialTheme.typography.titleLarge)
-            Text("Your tasks and events stay on this phone. No account. No sync.", color = Muted, style = MaterialTheme.typography.bodyMedium)
+            Text("Your data, your choice.", style = MaterialTheme.typography.titleLarge)
+            Text(if (state.cloud.workspace == null) "Original local data stays on this phone. Open Shared lists to connect a shared list." else "This list is shared with its members. Reminders and a saved copy stay on this phone. Shared event times use ${state.zoneId}.", color = Muted, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
@@ -182,7 +196,7 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
     val p0 = state.tasks.filter { it.priority == Priority.P0 && it.status != TaskStatus.MOVED && it.status != TaskStatus.STALE }
     val done = p0.count { it.status == TaskStatus.DONE }
     val occurrences = state.events.flatMap { listOfNotNull(EventRules.onDay(it, selected), EventRules.onDay(it, selected.plusDays(1))) }.sortedBy { it.at }
-    val nextEvent = occurrences.firstOrNull { !isToday || it.at >= LocalDateTime.now() }
+    val nextEvent = occurrences.firstOrNull { !isToday || it.at >= LocalDateTime.now(ZoneId.of(state.zoneId)) }
     LazyColumn(modifier = Modifier.testTag("day-list"), contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Column {
@@ -287,7 +301,7 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
 }
 
 @Composable private fun EventsScreen(state: DaymarkState, edit: (Event) -> Unit, add: () -> Unit, settings: () -> Unit) {
-    val now = LocalDateTime.now()
+    val now = LocalDateTime.now(ZoneId.of(state.zoneId))
     val upcoming = state.events.mapNotNull { event -> EventRules.next(event, now)?.let { Occurrence(event, it) } }.sortedBy { it.at }
     val past = state.events.filter { it.repeat == Repeat.ONCE && it.start < now }.sortedByDescending { it.start }
     LazyColumn(contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {

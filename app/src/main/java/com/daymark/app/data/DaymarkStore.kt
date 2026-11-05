@@ -9,6 +9,7 @@ import com.daymark.app.domain.*
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.Instant
+import java.time.ZoneId
 import java.util.UUID
 
 class DaymarkDatabase(private val context: Context, name: String = "daymark.db") : SQLiteOpenHelper(context, name, null, SCHEMA_VERSION) {
@@ -30,12 +31,15 @@ class DaymarkDatabase(private val context: Context, name: String = "daymark.db")
     }
 
     companion object {
-        private const val SCHEMA_VERSION = 1
+        private const val SCHEMA_VERSION = 2
     }
 }
 
 /** Every public operation is serialized, including background alarms and UI writes. */
-class DaymarkStore(private val helper: DaymarkDatabase) {
+class DaymarkStore(private val helper: DaymarkDatabase, val localRollover: Boolean = true, private val sharedZone: ZoneId? = null) {
+    val zone: ZoneId get() = sharedZone ?: ZoneId.systemDefault()
+    val storageId: String get() = helper.databaseName
+    @Synchronized fun close() = helper.close()
     private val db get() = helper.writableDatabase
 
     @Synchronized fun tasks(day: LocalDate): List<Task> = queryTasks("day = ?", arrayOf(day.toString()))
@@ -57,7 +61,7 @@ class DaymarkStore(private val helper: DaymarkDatabase) {
 
     @Synchronized fun deleteTask(id: Long) { db.delete("tasks", "id = ?", arrayOf(id.toString())) }
 
-    @Synchronized fun rollOver(today: LocalDate) = transaction { rollOverInternal(today) }
+    @Synchronized fun rollOver(today: LocalDate) { if (localRollover) transaction { rollOverInternal(today) } }
 
     private fun rollOverInternal(today: LocalDate) {
         // Persist a snapshot for every missed day, not only the day the app is reopened.
@@ -119,6 +123,27 @@ class DaymarkStore(private val helper: DaymarkDatabase) {
             arrayOf(event.id.toString(), event.version.toString(), reminder.trigger.epochSecond.toString(), at)) == 1
     }
 
+    /** Replace the shared read cache atomically; notification delivery remains device-local. */
+    @Synchronized fun replaceSnapshot(tasks: List<Task>, incomingEvents: List<Event>) = transaction {
+        val previous = events().associateBy { it.id }
+        db.delete("tasks", null, null)
+        tasks.forEach { task -> db.insertOrThrow("tasks", null, taskValues(task).apply { put("id", task.id) }) }
+        db.delete("events", null, null)
+        incomingEvents.forEach { event ->
+            val old = previous[event.id]
+            val sameSchedule = old != null && old.start == event.start && old.repeat == event.repeat
+            val sameVersion = old?.version == event.version
+            db.insertOrThrow("events", null, ContentValues().apply {
+                put("id", event.id); put("title", event.title); put("start", event.start.toString())
+                put("repeat", event.repeat.name); put("version", event.version)
+                if (sameSchedule) {
+                    put("notified_24h", old?.notified24h?.toString()); put("notified_30m", old?.notified30m?.toString())
+                    if (sameVersion) { put("next_24h_at", old?.next24h?.epochSecond); put("next_30m_at", old?.next30m?.epochSecond) }
+                }
+            })
+        }
+    }
+
     private fun leadSuffix(lead: Long): String = when (lead) { 1440L -> "24h"; 30L -> "30m"; else -> error("Invalid reminder lead") }
 
     private fun findTask(id: Long): Task? = queryTasks("id = ?", arrayOf(id.toString())).firstOrNull()
@@ -126,7 +151,7 @@ class DaymarkStore(private val helper: DaymarkDatabase) {
     private fun taskValues(task: Task) = ContentValues().apply {
         put("root_id", task.rootId); put("title", task.title); put("priority", task.priority.name)
         put("status", task.status.name); put("day", task.day.toString()); put("origin_day", task.originDay.toString())
-        put("moved_to", task.movedTo?.toString())
+        put("moved_to", task.movedTo?.toString()); put("sync_version", task.syncVersion)
     }
     private fun queryTasks(where: String, args: Array<String>): List<Task> = db.rawQuery(
         "SELECT * FROM tasks WHERE $where ORDER BY day DESC, id ASC", args
@@ -140,6 +165,7 @@ class DaymarkStore(private val helper: DaymarkDatabase) {
         priority = Priority.valueOf(text("priority")), status = TaskStatus.valueOf(text("status")),
         day = LocalDate.parse(text("day")), originDay = LocalDate.parse(text("origin_day")),
         movedTo = getString(getColumnIndexOrThrow("moved_to"))?.let(LocalDate::parse),
+        syncVersion = getLong(getColumnIndexOrThrow("sync_version")),
     )
     private fun Cursor.event() = Event(
         id = getLong(getColumnIndexOrThrow("id")), title = text("title"), start = LocalDateTime.parse(text("start")),
