@@ -155,8 +155,8 @@ class CloudClient(private val context: Context, private val transport: CloudTran
         }
     }
     fun workspaces(): List<Workspace> = JSONArray(rpc("list")).objects().map(Workspace::parse)
-    fun create(name: String): Workspace = Workspace.parse(JSONObject(rpc("create", JSONObject()
-        .put("id", UUID.randomUUID().toString()).put("name", name).put("time_zone", ZoneId.systemDefault().id))))
+    fun create(name: String, id: String = UUID.randomUUID().toString(), timeZone: String = ZoneId.systemDefault().id): Workspace = Workspace.parse(JSONObject(rpc("create", JSONObject()
+        .put("id", id).put("name", name).put("time_zone", timeZone))))
         .also { selectWorkspace(it) }
     fun join(code: String): Workspace = Workspace.parse(JSONObject(rpc("join", JSONObject().put("code", code.trim())))).also { selectWorkspace(it) }
     @Synchronized fun selectWorkspace(value: Workspace?) {

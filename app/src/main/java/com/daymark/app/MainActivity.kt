@@ -11,7 +11,7 @@ import com.daymark.app.ui.*
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
-    private val model: DaymarkViewModel by viewModels()
+    private val model: DaymarkViewModel by viewModels { androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory(application) }
     override fun attachBaseContext(newBase: Context) {
         val configuration = Configuration(newBase.resources.configuration).apply { setLocale(Locale.ENGLISH) }
         super.attachBaseContext(newBase.createConfigurationContext(configuration))

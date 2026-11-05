@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -37,6 +38,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.daymark.app.domain.*
+import com.daymark.app.sync.SharedProject
 import kotlinx.coroutines.delay
 import java.time.*
 import java.time.format.DateTimeFormatter
@@ -47,6 +49,10 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
 
 @Composable fun DaymarkApp(model: DaymarkViewModel, openEvents: Boolean = false) {
     val state by model.state.collectAsStateWithLifecycle()
+    if (!state.cloud.signedIn || state.cloud.workspace?.id != SharedProject.WORKSPACE_ID) {
+        PasswordScreen(state.cloud, model::signIn)
+        return
+    }
     var tab by rememberSaveable { mutableStateOf(if (openEvents) "Events" else "Today") }
     var editorStoreId by rememberSaveable { mutableStateOf(state.storeId) }
     var taskOpen by rememberSaveable { mutableStateOf(false) }
@@ -134,14 +140,26 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
                 ) { Icon(painterResource(R.drawable.ic_add), if (tab == "Events") "New event" else "New task") }
                 IconButton(onClick = { settingsOpen = true }) { Icon(painterResource(R.drawable.ic_notifications_none), "Reminder settings", tint = Forest) }
             }
-            TextButton(onClick = { cloudOpen = true }, modifier = Modifier.padding(horizontal = 16.dp)) {
-                Text(state.cloud.workspace?.let { "${it.name} · ${state.cloud.syncStatus}" } ?: "Shared lists", maxLines = 2)
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { cloudOpen = true }, modifier = Modifier.weight(1f)) {
+                    Text(state.cloud.workspace?.let { "${it.name} · ${state.cloud.syncStatus}" } ?: "Shared lists", maxLines = 2)
+                }
+                if (tab == "Today") TextButton(onClick = { model.refresh() }, enabled = !state.loading && !state.refreshing) {
+                    if (state.refreshing) {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(if (state.refreshing) "Refreshing…" else "Refresh")
+                }
             }
             when {
                 state.loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Forest) }
                 tab == "Events" -> EventsScreen(state, editEvent, newEvent, { settingsOpen = true })
                 tab == "Journal" -> JournalScreen(state) { model.select(it); tab = "Today" }
-                else -> DayScreen(state, model, newTask, editTask, editEvent, newEvent, { dateOpen = true })
+                else -> PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = { model.refresh() },
+                    modifier = Modifier.fillMaxSize().testTag("day-refresh")) {
+                    DayScreen(state, model, newTask, editTask, editEvent, newEvent, { dateOpen = true })
+                }
             }
         }
     }
@@ -206,7 +224,7 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
     val done = p0.count { it.status == TaskStatus.DONE }
     val occurrences = state.events.flatMap { listOfNotNull(EventRules.onDay(it, selected), EventRules.onDay(it, selected.plusDays(1))) }.sortedBy { it.at }
     val nextEvent = occurrences.firstOrNull { !isToday || it.at >= LocalDateTime.now(ZoneId.of(state.zoneId)) }
-    LazyColumn(modifier = Modifier.testTag("day-list"), contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(modifier = Modifier.fillMaxSize().testTag("day-list"), contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Column {
                 Text(heading, style = MaterialTheme.typography.displaySmall)
