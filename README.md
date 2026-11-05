@@ -65,7 +65,7 @@ Allow notifications and precise reminders through the bell button. Android may d
 
 Open **Shared lists** to configure your project URL and publishable key, sign in, create a list, or join with an invitation code. Members can edit the same tasks and events. The owner can rotate invitations and remove members. Edits require a connection; saved data is readable offline. The foreground app refreshes every 15 seconds, on resume, and after saves. It does not subscribe to Realtime or sync while closed.
 
-Run `supabase/migrations/202611040001_daymark.sql` once in your own Supabase project first. The app uses its authenticated RPC API; private tables are not exposed. No service-role key belongs in the app. See [free setup and migration instructions (中文)](docs/SUPABASE_SETUP.md).
+Run `supabase/migrations/202611040001_daymark.sql` once in your own Supabase project first. The app uses its authenticated RPC API; private tables are not exposed. No service-role key belongs in the app.
 
 Original local data can be explicitly imported once into a shared list, including history. The original database remains separate and can still be used locally. Shared tasks roll over on the server using the list's fixed time zone. Shared event times and reminders use that zone; notification delivery state remains local to each device. Concurrent edits use revision checks instead of silently overwriting changes.
 
