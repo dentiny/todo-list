@@ -20,6 +20,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 class ReminderScheduler(private val context: Context, private val store: DaymarkStore) {
+    private var stopped = false
     private val alarms get() = context.getSystemService(AlarmManager::class.java)
     val exactAllowed get() = Build.VERSION.SDK_INT < 31 || alarms.canScheduleExactAlarms()
     val notificationsAllowed get() = NotificationManagerCompat.from(context).areNotificationsEnabled() &&
@@ -34,6 +35,7 @@ class ReminderScheduler(private val context: Context, private val store: Daymark
     }
 
     @Synchronized fun refresh(now: Instant = Instant.now(), zone: ZoneId = store.zone) {
+        if (stopped) return
         store.rollOver(now.atZone(zone).toLocalDate())
         // Deliver already-due persisted schedules before replacing alarms. This prevents
         // midnight/resume/reboot from cancelling a reminder that Android has not delivered yet.
@@ -58,7 +60,9 @@ class ReminderScheduler(private val context: Context, private val store: Daymark
         store.deleteEvent(eventId)
     }
 
-    @Synchronized fun cancelAll() {
+    @Synchronized fun stop() {
+        if (stopped) return
+        stopped = true
         store.events().forEach { event -> LEADS.forEach { alarms.cancel(eventIntent(event.id, it)) } }
         alarms.cancel(midnightIntent())
         NotificationManagerCompat.from(context).cancelAll()
@@ -83,6 +87,7 @@ class ReminderScheduler(private val context: Context, private val store: Daymark
     }
 
     @Synchronized fun receive(intent: Intent, now: Instant = Instant.now()) {
+        if (stopped) return
         if (intent.getStringExtra("store_id") != store.storageId &&
             !(intent.getStringExtra("store_id") == null && store.localRollover)) return
         if (intent.action == MIDNIGHT) { refresh(now); return }

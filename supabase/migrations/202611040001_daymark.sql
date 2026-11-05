@@ -55,7 +55,7 @@ declare
  w daymark.workspaces%rowtype;
  t daymark.tasks%rowtype;
  e daymark.events%rowtype;
- d date; next_day date; affected integer; item jsonb; new_root text;
+ d date; next_day date; item jsonb; new_root text;
  rid uuid; rolled boolean := false;
 begin
  if uid is null then raise exception 'Sign in required' using errcode='42501'; end if;
@@ -112,7 +112,7 @@ begin
   return jsonb_build_object('today',d,'revision',w.revision,'tasks',coalesce((select jsonb_agg(to_jsonb(x) order by x.id) from daymark.tasks x where x.workspace_id=workspace),'[]'::jsonb),
    'events',coalesce((select jsonb_agg(to_jsonb(x) order by x.id) from daymark.events x where x.workspace_id=workspace),'[]'::jsonb));
  end if;
- if action not in ('add_task','update_task','delete_task','save_event','delete_event','import') then raise exception 'Unknown action'; end if;
+ if action is null or action not in ('add_task','update_task','delete_task','save_event','delete_event','import') then raise exception 'Unknown action'; end if;
  rid := (payload->>'request_id')::uuid;
  if rid is null then raise exception 'Request ID required'; end if;
  if exists(select 1 from daymark.requests where workspace_id=workspace and user_id=uid and request_id=rid) then return '{}'::jsonb; end if;

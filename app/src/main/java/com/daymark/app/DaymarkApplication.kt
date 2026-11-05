@@ -19,7 +19,7 @@ class DaymarkApplication : Application() {
     val scheduler: ReminderScheduler @Synchronized get() {
         val active = store
         if (scheduledStore !== active) {
-            currentScheduler?.cancelAll()
+            currentScheduler?.stop()
             scheduledStore?.takeIf { it !== localStore }?.close()
             scheduledStore = active
             currentScheduler = ReminderScheduler(this, active)

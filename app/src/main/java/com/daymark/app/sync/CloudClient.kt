@@ -96,6 +96,7 @@ class CloudClient(private val context: Context, private val transport: CloudTran
     var workspace: Workspace? = prefs.getString("workspace", null)?.let { runCatching { Workspace.parse(JSONObject(it)) }.getOrNull() }
         private set
     private var cache: DaymarkStore? = null
+    private var cacheRevision: Long? = null
     val url get() = prefs.getString("url", "").orEmpty()
     val publicKey get() = prefs.getString("public_key", "").orEmpty()
     val signedIn get() = session != null
@@ -114,7 +115,7 @@ class CloudClient(private val context: Context, private val transport: CloudTran
         require(!signedIn) { "Sign out before changing projects." }
         validateConfiguration(endpoint, key)
         check(prefs.edit().putString("url", endpoint.trim().trimEnd('/')).putString("public_key", key.trim()).remove("workspace").commit())
-        workspace = null; cache = null
+        workspace = null; cache = null; cacheRevision = null
     }
     fun authenticate(email: String, password: String, register: Boolean): String {
         require(url.isNotBlank()) { "Add your Supabase project URL and public key first." }
@@ -160,7 +161,7 @@ class CloudClient(private val context: Context, private val transport: CloudTran
     fun join(code: String): Workspace = Workspace.parse(JSONObject(rpc("join", JSONObject().put("code", code.trim())))).also { selectWorkspace(it) }
     @Synchronized fun selectWorkspace(value: Workspace?) {
         check(prefs.edit().apply { if (value == null) remove("workspace") else putString("workspace", value.json().toString()) }.commit())
-        cache = null; workspace = value
+        cache = null; cacheRevision = null; workspace = value
     }
     fun signOut() {
         // Local sign-out works offline. Tokens are erased even when server logout fails.
@@ -169,9 +170,8 @@ class CloudClient(private val context: Context, private val transport: CloudTran
     }
     fun snapshot() {
         val store = activeStore ?: error("Choose a shared list first.")
-        val revisionKey = "revision-${scope()}"
         val payload = JSONObject()
-        if (context.getDatabasePath(store.storageId).exists() && prefs.contains(revisionKey)) payload.put("revision", prefs.getLong(revisionKey, -1))
+        cacheRevision?.let { payload.put("revision", it) }
         val result = JSONObject(rpc("snapshot", payload))
         if (result.optBoolean("unchanged")) return
         val tasks = result.getJSONArray("tasks").objects().map { j -> Task(
@@ -182,7 +182,7 @@ class CloudClient(private val context: Context, private val transport: CloudTran
         val events = result.getJSONArray("events").objects().map { j -> Event(id = j.getLong("id"), title = j.getString("title"),
             start = LocalDateTime.parse(j.getString("start")), repeat = Repeat.valueOf(j.getString("repeat")), version = j.getLong("version")) }
         store.replaceSnapshot(tasks, events)
-        check(prefs.edit().putLong(revisionKey, result.getLong("revision")).commit())
+        cacheRevision = result.getLong("revision")
     }
     fun mutate(action: String, payload: JSONObject) {
         val key = pendingKey()

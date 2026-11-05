@@ -103,4 +103,25 @@ class CloudClientTest {
         assertTrue(client.activeStore!!.allTasks().isEmpty())
     }
 
+    @Test fun `recreated empty cache downloads a full snapshot despite old revision preferences`() {
+        val task = JSONObject().put("id",101).put("root_id","root").put("title","Keep me").put("priority","P0")
+            .put("status","OPEN").put("day","2026-11-05").put("origin_day","2026-11-05").put("moved_to",JSONObject.NULL).put("sync_version",1)
+        val snapshot = JSONObject().put("revision",5).put("tasks",org.json.JSONArray().put(task)).put("events",org.json.JSONArray()).toString()
+        val first = CloudClient(context, CloudTransport { _, _, _, _ -> snapshot },MemorySession(session()))
+        first.snapshot()
+        val database = first.activeStore!!.storageId
+        first.activeStore!!.close()
+        context.deleteDatabase(database)
+        // App startup/reminder scheduling may recreate the cache before the first network request.
+        val empty = com.daymark.app.data.DaymarkStore(com.daymark.app.data.DaymarkDatabase(context,database),false)
+        empty.events()
+        empty.close()
+        val restored = CloudClient(context, CloudTransport { _, _, _, body ->
+            if (body.getJSONObject("payload").has("revision")) JSONObject().put("unchanged",true).put("revision",5).toString()
+            else snapshot
+        },MemorySession(session()))
+        restored.snapshot()
+        assertEquals("Keep me",restored.activeStore!!.allTasks().single().title)
+    }
+
 }

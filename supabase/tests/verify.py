@@ -4,7 +4,6 @@ PGHOST/PGPORT/PGUSER select the temporary instance. Requires psql on PATH.
 import concurrent.futures
 import datetime
 import json
-import os
 from pathlib import Path
 import subprocess
 import uuid
@@ -106,4 +105,25 @@ changed=rpc('snapshot',ws,{'revision':snap['revision']})
 assert 'tasks' in changed and changed['revision']>snap['revision']
 assert all(t['id']!=historical['id'] for t in changed['tasks'])
 ok('unchanged snapshots save bandwidth; history deletion increments the revision')
+other = rpc('create',payload={'id':str(uuid.uuid4()),'name':'Other workspace','time_zone':'UTC'},user=USERS[2])['id']
+rpc('add_task',other,{**request,'request_id':str(uuid.uuid4()),'root_id':str(uuid.uuid4())},user=USERS[2])
+foreign = rpc('snapshot',other,user=USERS[2])['tasks'][0]
+rpc('delete_task',ws,{**foreign,'request_id':str(uuid.uuid4())},error='This task changed')
+assert rpc('snapshot',other,user=USERS[2])['tasks'][0]==foreign
+ok('a member cannot edit a task belonging to another workspace')
+current = next(t for t in rpc('snapshot',ws)['tasks'] if t['status']=='OPEN')
+def edit_once(title):
+    try:
+        rpc('update_task',ws,{**current,'title':title,'request_id':str(uuid.uuid4())})
+        return True
+    except AssertionError as error:
+        assert 'This task changed' in str(error), error
+        return False
+with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+    assert sum(pool.map(edit_once,['Concurrent A','Concurrent B']))==1
+ok('exactly one concurrent edit succeeds for a given task version')
+revision=rpc('snapshot',ws)['revision']
+sql("select public.daymark_rpc(null,'"+ws+"','"+json.dumps({'request_id':str(uuid.uuid4())})+"'::jsonb);",USERS[0],'authenticated',error='Unknown action')
+assert rpc('snapshot',ws)['revision']==revision
+ok('invalid null actions fail without changing workspace revision')
 print(f'{count} database integration checks passed.')

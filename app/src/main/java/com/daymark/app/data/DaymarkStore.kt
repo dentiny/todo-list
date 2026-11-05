@@ -91,9 +91,9 @@ class DaymarkStore(private val helper: DaymarkDatabase, val localRollover: Boole
         val values = ContentValues().apply {
             put("title", event.title.trim()); put("start", event.start.toString()); put("repeat", event.repeat.name)
             put("version", (previous?.version ?: 0) + 1)
-            // Pending alarms belong to the previous version. Title-only edits retain deduplication.
-            putNull("next_24h_at"); putNull("next_30m_at")
+            // Title-only edits retain pending delivery and deduplication for this device.
             if (previous == null || previous.start != event.start || previous.repeat != event.repeat) {
+                putNull("next_24h_at"); putNull("next_30m_at")
                 putNull("notified_24h"); putNull("notified_30m")
             }
         }
@@ -132,13 +132,12 @@ class DaymarkStore(private val helper: DaymarkDatabase, val localRollover: Boole
         incomingEvents.forEach { event ->
             val old = previous[event.id]
             val sameSchedule = old != null && old.start == event.start && old.repeat == event.repeat
-            val sameVersion = old?.version == event.version
             db.insertOrThrow("events", null, ContentValues().apply {
                 put("id", event.id); put("title", event.title); put("start", event.start.toString())
                 put("repeat", event.repeat.name); put("version", event.version)
                 if (sameSchedule) {
                     put("notified_24h", old?.notified24h?.toString()); put("notified_30m", old?.notified30m?.toString())
-                    if (sameVersion) { put("next_24h_at", old?.next24h?.epochSecond); put("next_30m_at", old?.next30m?.epochSecond) }
+                    put("next_24h_at", old?.next24h?.epochSecond); put("next_30m_at", old?.next30m?.epochSecond)
                 }
             })
         }

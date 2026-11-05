@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.*
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -62,7 +63,7 @@ import androidx.compose.ui.unit.dp
                     if (state.owner) {
                         OutlinedButton(onClick = { model.showInvite() }, enabled = !state.busy) { Text("Show invitation and members") }
                         state.inviteCode?.let { invitation ->
-                            SelectionContainerCompat(invitation)
+                            SelectionContainer { Text(invitation, style = MaterialTheme.typography.bodyMedium) }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 TextButton(onClick = {
                                     (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
@@ -107,7 +108,4 @@ import androidx.compose.ui.unit.dp
         text = { Text("This person will lose cloud access to this list. Data already saved on their phone cannot be remotely erased. Replace the invitation code too if they know it.") },
         confirmButton = { TextButton(onClick = { removeId = null; model.removeMember(id) }) { Text("Remove") } },
         dismissButton = { TextButton(onClick = { removeId = null }) { Text("Cancel") } }) }
-}
-@Composable private fun SelectionContainerCompat(value: String) {
-    androidx.compose.foundation.text.selection.SelectionContainer { Text(value, style = MaterialTheme.typography.bodyMedium) }
 }

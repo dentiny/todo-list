@@ -48,6 +48,7 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
 @Composable fun DaymarkApp(model: DaymarkViewModel, openEvents: Boolean = false) {
     val state by model.state.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(if (openEvents) "Events" else "Today") }
+    var editorStoreId by rememberSaveable { mutableStateOf(state.storeId) }
     var taskOpen by rememberSaveable { mutableStateOf(false) }
     var editingTaskVersion by rememberSaveable { mutableLongStateOf(1L) }
     var editingEventVersion by rememberSaveable { mutableLongStateOf(1L) }
@@ -68,11 +69,19 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
         if (Build.VERSION.SDK_INT >= 33 && !state.notificationsAllowed) notificationRequest.launch(Manifest.permission.POST_NOTIFICATIONS)
         else context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName))
     }
-    val editTask: (Task) -> Unit = { model.clearEditorResult(); editingTaskId = it.id; editingTaskVersion = it.syncVersion; initialPriority = it.priority; taskDay = it.day.toString(); taskOpen = true }
-    val newTask: (Priority) -> Unit = { model.clearEditorResult(); editingTaskId = null; initialPriority = it; taskDay = state.selected.toString(); taskOpen = true }
-    val editEvent: (Event) -> Unit = { model.clearEditorResult(); editingEventId = it.id; editingEventVersion = it.version; eventOpen = true }
-    val newEvent: () -> Unit = { model.clearEditorResult(); editingEventId = null; eventOpen = true }
+    val editTask: (Task) -> Unit = { editorStoreId = state.storeId; model.clearEditorResult(); editingTaskId = it.id; editingTaskVersion = it.syncVersion; initialPriority = it.priority; taskDay = it.day.toString(); taskOpen = true }
+    val newTask: (Priority) -> Unit = { editorStoreId = state.storeId; model.clearEditorResult(); editingTaskId = null; initialPriority = it; taskDay = state.selected.toString(); taskOpen = true }
+    val editEvent: (Event) -> Unit = { editorStoreId = state.storeId; model.clearEditorResult(); editingEventId = it.id; editingEventVersion = it.version; eventOpen = true }
+    val newEvent: () -> Unit = { editorStoreId = state.storeId; model.clearEditorResult(); editingEventId = null; eventOpen = true }
 
+    val editorAvailable = editorStoreId == state.storeId
+    LaunchedEffect(state.storeId, state.loading) {
+        if (!state.loading && !editorAvailable) {
+            taskOpen = false
+            eventOpen = false
+            model.clearEditorResult()
+        }
+    }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(lifecycle, state.zoneId) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -140,12 +149,12 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
     if (cloudOpen) CloudPanel(state.cloud, model) { cloudOpen = false }
 
     // Wait for SQLite after process restoration; a missing ID must never become a new item.
-    val missingItem = !state.loading && !state.editorSaved &&
+    val missingItem = editorAvailable && !state.loading && !state.editorSaved &&
         ((taskOpen && editingTaskId != null && editingTask == null) || (eventOpen && editingEventId != null && editingEvent == null))
     if (missingItem) AlertDialog(onDismissRequest = { taskOpen = false; eventOpen = false },
         title = { Text("Entry unavailable") }, text = { Text("This entry is no longer available. Your other entries are safe.") },
         confirmButton = { TextButton(onClick = { taskOpen = false; eventOpen = false }) { Text("Close") } })
-    if (taskOpen && !state.loading && !missingItem && !state.editorSaved) TaskEditor(editingTask, initialPriority, LocalDate.parse(taskDay),
+    if (taskOpen && editorAvailable && !state.loading && !missingItem && !state.editorSaved) TaskEditor(editingTask, initialPriority, LocalDate.parse(taskDay),
         onDismiss = { taskOpen = false },
         onSave = { title, priority, status ->
             editingTask?.let { model.updateTask(it.copy(title = title, priority = priority, status = status, syncVersion = editingTaskVersion), fromEditor = true) }
@@ -154,7 +163,7 @@ internal fun LocalDateTime.label(pattern: String) = format(DateTimeFormatter.ofP
         onDelete = { editingTask?.let { model.deleteTask(it.id, editingTaskVersion) } },
         saving = state.editorSaving, error = state.editorError,
     )
-    if (eventOpen && !state.loading && !missingItem && !state.editorSaved) EventEditor(editingEvent, onDismiss = { eventOpen = false },
+    if (eventOpen && editorAvailable && !state.loading && !missingItem && !state.editorSaved) EventEditor(editingEvent, onDismiss = { eventOpen = false },
         onSave = { model.saveEvent(if (editingEventId == null) it else it.copy(version = editingEventVersion)) }, onDelete = { editingEvent?.let { model.deleteEvent(it.id, editingEventVersion) } }, saving = state.editorSaving, error = state.editorError, zone = ZoneId.of(state.zoneId))
     if (dateOpen) CalendarDialog(state.selected, { dateOpen = false }) { model.select(it); dateOpen = false }
     if (settingsOpen) ModalBottomSheet(onDismissRequest = { settingsOpen = false }, containerColor = Paper) {

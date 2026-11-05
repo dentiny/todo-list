@@ -31,6 +31,7 @@ data class DaymarkState(
     val notificationsAllowed: Boolean = false, val exactAllowed: Boolean = false,
     val loading: Boolean = true, val error: String? = null,
     val editorSaving: Boolean = false, val editorSaved: Boolean = false, val editorError: String? = null,
+    val storeId: String = "daymark.db",
     val cloud: CloudUi = CloudUi(), val zoneId: String = ZoneId.systemDefault().id,
 )
 class DaymarkViewModel(application: Application) : AndroidViewModel(application) {
@@ -41,33 +42,36 @@ class DaymarkViewModel(application: Application) : AndroidViewModel(application)
     private var refreshQueued = false
     init { refresh(true) }
 
-    private fun cloudInfo(old: CloudUi = mutable.value.cloud): CloudUi {
+    private fun cloudInfo(old: CloudUi): CloudUi {
         val c = app.cloud
         return old.copy(url = c.url, key = c.publicKey, email = c.email, signedIn = c.signedIn,
             workspace = c.workspace, owner = c.signedIn && c.workspace?.owner == c.userId, pending = c.hasPending)
     }
     private fun loadState(editor: Boolean = false) {
         val store = app.store
+        val scheduler = app.scheduler
+        scheduler.refresh()
         val today = LocalDate.now(store.zone)
-        store.rollOver(today)
-        mutable.update { old ->
-            val selected = if (old.selected == old.today || old.zoneId != store.zone.id) today else old.selected
-            old.copy(today = today, selected = selected, tasks = store.tasks(selected), allTasks = store.allTasks(), events = store.events(),
-                zoneId = store.zone.id, notificationsAllowed = app.scheduler.notificationsAllowed, exactAllowed = app.scheduler.exactAllowed,
-                loading = false, cloud = cloudInfo(old.cloud), editorSaving = if (editor) false else old.editorSaving,
-                editorSaved = editor || old.editorSaved)
+        val old = mutable.value
+        val selected = if (old.selected == old.today || old.zoneId != store.zone.id) today else old.selected
+        val tasks = store.tasks(selected)
+        val allTasks = store.allTasks()
+        val events = store.events()
+        mutable.update { current ->
+            current.copy(today = today, selected = selected, tasks = tasks, allTasks = allTasks, events = events,
+                storeId = store.storageId, zoneId = store.zone.id, notificationsAllowed = scheduler.notificationsAllowed, exactAllowed = scheduler.exactAllowed,
+                loading = false, cloud = cloudInfo(current.cloud), editorSaving = if (editor) false else current.editorSaving,
+                editorSaved = editor || current.editorSaved)
         }
     }
     private fun sync() {
         if (app.cloud.activeStore == null) return
         try {
             app.cloud.snapshot()
-            app.scheduler.refresh()
             mutable.update { it.copy(cloud = it.cloud.copy(syncStatus = "Up to date")) }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             if (e is CloudFailure && e.status == 403) {
-                app.scheduler.cancelAll()
                 app.cloud.selectWorkspace(null)
                 mutable.update { it.copy(error = "Your access to the shared list was removed. Showing your original local data.", cloud = cloudInfo(it.cloud).copy(syncStatus = "Access removed", inviteCode = null, members = emptyList())) }
             } else {
@@ -75,7 +79,8 @@ class DaymarkViewModel(application: Application) : AndroidViewModel(application)
             }
         }
     }
-    private fun runOperation(editor: Boolean = false, syncCloud: Boolean = false, onFinished: () -> Unit = {}, block: () -> Unit = {}) {
+    private fun runOperation(editor: Boolean = false, write: Boolean = false, syncCloud: Boolean = false, onFinished: () -> Unit = {}, block: () -> Unit = {}) {
+        val expectedStoreId = if (write) mutable.value.storeId else null
         if (editor) {
             if (mutable.value.editorSaving) return
             mutable.update { it.copy(editorSaving = true, editorSaved = false, editorError = null) }
@@ -84,6 +89,9 @@ class DaymarkViewModel(application: Application) : AndroidViewModel(application)
             mutex.withLock {
                 try {
                     withContext(Dispatchers.IO) {
+                        require(expectedStoreId == null || expectedStoreId == app.store.storageId) {
+                            "The active list changed. Reopen the entry before editing."
+                        }
                         block()
                         if (syncCloud) sync()
                         loadState(editor)
@@ -107,23 +115,23 @@ class DaymarkViewModel(application: Application) : AndroidViewModel(application)
         runOperation(syncCloud = true, onFinished = { refreshQueued = false }) { if (reschedule) app.scheduler.refresh() }
     }
     fun select(day: LocalDate) = runOperation { mutable.update { it.copy(selected = day) } }
-    fun addTask(title: String, priority: Priority, day: LocalDate) = runOperation(editor = true, syncCloud = true) {
+    fun addTask(title: String, priority: Priority, day: LocalDate) = runOperation(editor = true, write = true, syncCloud = true) {
         if (app.cloud.activeStore == null) app.store.addTask(title, priority, day)
         else app.cloud.mutate("add_task", JSONObject().put("title", title.trim()).put("priority", priority.name).put("day", day.toString()))
     }
-    fun updateTask(task: Task, fromEditor: Boolean = false) = runOperation(editor = fromEditor, syncCloud = true) {
+    fun updateTask(task: Task, fromEditor: Boolean = false) = runOperation(editor = fromEditor, write = true, syncCloud = true) {
         if (app.cloud.activeStore == null) app.store.updateTask(task, LocalDate.now())
         else app.cloud.mutate("update_task", CloudClient.taskJson(task))
     }
-    fun deleteTask(id: Long, expectedVersion: Long? = null) = runOperation(editor = true, syncCloud = true) {
+    fun deleteTask(id: Long, expectedVersion: Long? = null) = runOperation(editor = true, write = true, syncCloud = true) {
         if (app.cloud.activeStore == null) app.store.deleteTask(id)
         else app.cloud.mutate("delete_task", CloudClient.taskJson(app.store.allTasks().single { it.id == id }).apply { expectedVersion?.let { put("sync_version", it) } })
     }
-    fun saveEvent(event: Event) = runOperation(editor = true, syncCloud = true) {
+    fun saveEvent(event: Event) = runOperation(editor = true, write = true, syncCloud = true) {
         if (app.cloud.activeStore == null) app.scheduler.save(event)
         else app.cloud.mutate("save_event", CloudClient.eventJson(event))
     }
-    fun deleteEvent(id: Long, expectedVersion: Long? = null) = runOperation(editor = true, syncCloud = true) {
+    fun deleteEvent(id: Long, expectedVersion: Long? = null) = runOperation(editor = true, write = true, syncCloud = true) {
         if (app.cloud.activeStore == null) app.scheduler.delete(id)
         else app.cloud.mutate("delete_event", CloudClient.eventJson(app.store.event(id) ?: error("Event unavailable")).apply { expectedVersion?.let { put("version", it) } })
     }
@@ -151,35 +159,40 @@ class DaymarkViewModel(application: Application) : AndroidViewModel(application)
             }
         }
     }
+    private fun refreshWorkspaceList() {
+        val lists = app.cloud.workspaces()
+        mutable.update { it.copy(cloud = it.cloud.copy(workspaces = lists)) }
+    }
     fun configureCloud(url: String, key: String) = cloudOperation { app.cloud.configure(url, key); "Project saved. Sign in below." }
     fun authenticate(email: String, password: String, register: Boolean) = cloudOperation {
         val message = app.cloud.authenticate(email, password, register)
-        if (app.cloud.signedIn) mutable.update { it.copy(cloud = it.cloud.copy(workspaces = app.cloud.workspaces())) }
+        if (app.cloud.signedIn) refreshWorkspaceList()
         message
     }
     fun listWorkspaces() = cloudOperation {
-        if (app.cloud.signedIn) mutable.update { it.copy(cloud = it.cloud.copy(workspaces = app.cloud.workspaces())) }
+        if (app.cloud.signedIn) refreshWorkspaceList()
         null
     }
     fun createWorkspace(name: String) = cloudOperation {
-        app.scheduler.cancelAll(); app.cloud.create(name)
-        mutable.update { it.copy(cloud = it.cloud.copy(workspaces = app.cloud.workspaces(), inviteCode = null, members = emptyList())) }
+        app.cloud.create(name)
+        refreshWorkspaceList()
+        mutable.update { it.copy(cloud = it.cloud.copy(inviteCode = null, members = emptyList())) }
         "Shared list created. Use Show invitation to invite someone."
     }
     fun joinWorkspace(code: String) = cloudOperation {
-        app.scheduler.cancelAll(); app.cloud.join(code)
-        mutable.update { it.copy(cloud = it.cloud.copy(workspaces = app.cloud.workspaces(), inviteCode = null, members = emptyList())) }
+        app.cloud.join(code)
+        refreshWorkspaceList()
+        mutable.update { it.copy(cloud = it.cloud.copy(inviteCode = null, members = emptyList())) }
         "Joined shared list."
     }
     fun selectWorkspace(workspace: Workspace?) = cloudOperation {
-        app.scheduler.cancelAll(); app.cloud.selectWorkspace(workspace)
+        app.cloud.selectWorkspace(workspace)
         mutable.update { it.copy(cloud = it.cloud.copy(inviteCode = null, members = emptyList(), syncStatus = "")) }
-        app.scheduler.refresh()
         null
     }
     fun signOut() = cloudOperation {
-        app.scheduler.cancelAll(); app.cloud.signOut()
-        mutable.update { it.copy(cloud = CloudUi()) }; app.scheduler.refresh()
+        app.cloud.signOut()
+        mutable.update { it.copy(cloud = CloudUi()) }
         "Signed out. Your original local data is available on this phone."
     }
     fun showInvite(rotate: Boolean = false) = cloudOperation {

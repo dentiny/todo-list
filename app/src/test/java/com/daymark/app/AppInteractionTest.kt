@@ -173,4 +173,23 @@ class AppInteractionTest {
         assertFalse(uiApp().cloud.signedIn)
     }
 
+    @Test fun `switching lists closes an editor even when entry IDs match`() {
+        val app = uiApp()
+        val model = ViewModelProvider(compose.activity)[DaymarkViewModel::class.java]
+        compose.runOnIdle {
+            app.store.addTask("Original list entry",Priority.P0,java.time.LocalDate.now())
+            model.refresh()
+        }
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("Original list entry").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Original list entry").performClick()
+        compose.onNodeWithText("Make it yours.").assertExists()
+        compose.runOnIdle {
+            val flow = org.robolectric.util.ReflectionHelpers.getField<kotlinx.coroutines.flow.MutableStateFlow<com.daymark.app.ui.DaymarkState>>(model,"mutable")
+            val other = flow.value.allTasks.single().copy(title="Other list entry")
+            flow.value = flow.value.copy(storeId="different-list.db",allTasks=listOf(other),tasks=listOf(other))
+        }
+        compose.onNodeWithText("Make it yours.").assertDoesNotExist()
+        assertEquals("Original list entry",compose.runOnIdle { app.store.allTasks().single().title })
+    }
+
 }
