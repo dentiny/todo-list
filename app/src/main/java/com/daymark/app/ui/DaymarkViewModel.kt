@@ -29,17 +29,17 @@ data class DaymarkState(
     val today: LocalDate = LocalDate.now(), val selected: LocalDate = today,
     val tasks: List<Task> = emptyList(), val allTasks: List<Task> = emptyList(), val events: List<Event> = emptyList(),
     val notificationsAllowed: Boolean = false, val exactAllowed: Boolean = false,
-    val loading: Boolean = true, val error: String? = null,
+    val loading: Boolean = true, val refreshing: Boolean = false, val error: String? = null,
     val editorSaving: Boolean = false, val editorSaved: Boolean = false, val editorError: String? = null,
     val storeId: String = "daymark.db",
     val cloud: CloudUi = CloudUi(), val zoneId: String = ZoneId.systemDefault().id,
 )
 class DaymarkViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application.daymark
-    private val mutable = MutableStateFlow(DaymarkState())
+    private val mutable = MutableStateFlow(DaymarkState(cloud = CloudUi(
+        signedIn = app.cloud.signedIn, email = app.cloud.email, workspace = app.cloud.workspace)))
     val state = mutable.asStateFlow()
     private val mutex = Mutex()
-    private var refreshQueued = false
     init { refresh(true) }
 
     private fun cloudInfo(old: CloudUi): CloudUi {
@@ -73,7 +73,7 @@ class DaymarkViewModel(application: Application) : AndroidViewModel(application)
             if (e is CancellationException) throw e
             if (e is CloudFailure && e.status == 403) {
                 app.cloud.selectWorkspace(null)
-                mutable.update { it.copy(error = "Your access to the shared list was removed. Showing your original local data.", cloud = cloudInfo(it.cloud).copy(syncStatus = "Access removed", inviteCode = null, members = emptyList())) }
+                mutable.update { it.copy(error = "Your access to the shared list was removed. Sign in again to continue.", cloud = cloudInfo(it.cloud).copy(message = "Your access to the shared list was removed. Sign in again to continue.", syncStatus = "Access removed", inviteCode = null, members = emptyList())) }
             } else {
                 mutable.update { it.copy(cloud = it.cloud.copy(syncStatus = "Sync unavailable · showing saved data")) }
             }
@@ -110,9 +110,9 @@ class DaymarkViewModel(application: Application) : AndroidViewModel(application)
         }
     }
     fun refresh(reschedule: Boolean = false) {
-        if (refreshQueued) return
-        refreshQueued = true
-        runOperation(syncCloud = true, onFinished = { refreshQueued = false }) { if (reschedule) app.scheduler.refresh() }
+        if (mutable.value.refreshing) return
+        mutable.update { it.copy(refreshing = true) }
+        runOperation(syncCloud = true, onFinished = { mutable.update { it.copy(refreshing = false) } }) { if (reschedule) app.scheduler.refresh() }
     }
     fun select(day: LocalDate) = runOperation { mutable.update { it.copy(selected = day) } }
     fun addTask(title: String, priority: Priority, day: LocalDate) = runOperation(editor = true, write = true, syncCloud = true) {
@@ -163,6 +163,16 @@ class DaymarkViewModel(application: Application) : AndroidViewModel(application)
         val lists = app.cloud.workspaces()
         mutable.update { it.copy(cloud = it.cloud.copy(workspaces = lists)) }
     }
+    fun signIn(password: String) = cloudOperation {
+        require(password.isNotBlank()) { "Enter the shared password." }
+        if (app.cloud.url != SharedProject.URL || app.cloud.publicKey != SharedProject.PUBLIC_KEY) {
+            if (app.cloud.signedIn) app.cloud.signOut()
+            app.cloud.configure(SharedProject.URL, SharedProject.PUBLIC_KEY)
+        }
+        app.cloud.authenticate(SharedProject.EMAIL, password, false)
+        app.cloud.create(SharedProject.NAME, SharedProject.WORKSPACE_ID, SharedProject.TIME_ZONE)
+        "Connected to the shared list."
+    }
     fun configureCloud(url: String, key: String) = cloudOperation { app.cloud.configure(url, key); "Project saved. Sign in below." }
     fun authenticate(email: String, password: String, register: Boolean) = cloudOperation {
         val message = app.cloud.authenticate(email, password, register)
@@ -193,7 +203,7 @@ class DaymarkViewModel(application: Application) : AndroidViewModel(application)
     fun signOut() = cloudOperation {
         app.cloud.signOut()
         mutable.update { it.copy(cloud = CloudUi()) }
-        "Signed out. Your original local data is available on this phone."
+        "Signed out. Enter the shared password to continue."
     }
     fun showInvite(rotate: Boolean = false) = cloudOperation {
         val result = app.cloud.invite(rotate)

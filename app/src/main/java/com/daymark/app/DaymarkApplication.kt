@@ -10,9 +10,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 
-class DaymarkApplication : Application() {
+open class DaymarkApplication : Application() {
     val localStore by lazy { DaymarkStore(DaymarkDatabase(this)) }
-    val cloud by lazy { CloudClient(this) }
+    val cloud by lazy { createCloudClient() }
+    protected open fun createCloudClient(): CloudClient = CloudClient(this)
     val store get() = cloud.activeStore ?: localStore
     private var scheduledStore: DaymarkStore? = null
     private var currentScheduler: ReminderScheduler? = null

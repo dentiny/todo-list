@@ -2,7 +2,7 @@
 
 **Make room for what matters.**
 
-A quiet Android planner for daily priorities, upcoming events, and a record of your days. Keep a private local planner, or connect a shared list with Supabase Free.
+A quiet Android planner for daily priorities, upcoming events, and a record of your days. A shared planner for a small group, with one shared-password sign-in backed by Supabase Free.
 
 ## Design principles
 
@@ -61,16 +61,18 @@ Each day has three task sections and an Events section:
 
 Allow notifications and precise reminders through the bell button. Android may delay reminders without precise alarm access; it cannot deliver them while the phone is off or the app is force-stopped.
 
-### Shared lists (Supabase Free)
+### Shared list
 
-Open **Shared lists** to configure your project URL and publishable key, sign in, create a list, or join with an invitation code. Members can edit the same tasks and events. The owner can rotate invitations and remove members. Edits require a connection; saved data is readable offline. The foreground app refreshes every 15 seconds, on resume, and after saves. It does not subscribe to Realtime or sync while closed.
+Install the APK and enter the shared App password on the opening screen. The project, account, and shared list are preconfigured. You stay signed in until you sign out; the password is never bundled in the APK. Everyone using this account can read and edit the same tasks and events.
 
-Run `supabase/migrations/202611040001_daymark.sql` once in your own Supabase project first. The app uses its authenticated RPC API; private tables are not exposed. No service-role key belongs in the app.
+On Today, tap **Refresh** or pull down from the top of the list to load other people's saved changes. The foreground app also checks for updates every 15 seconds and refreshes on resume and after saves. Saving shared edits requires internet; previously synchronized data is available offline. Refresh progress is shown, and overlapping refresh requests are coalesced.
 
-Original local data can be explicitly imported once into a shared list, including history. The original database remains separate and can still be used locally. Shared tasks roll over on the server using the list's fixed time zone. Shared event times and reminders use that zone; notification delivery state remains local to each device. Concurrent edits use revision checks instead of silently overwriting changes.
+Shared tasks carry forward until completed or marked Stale, with history preserved. Rollover and shared event times use the list's fixed time zone. Notification state remains local to each device. The app does not continuously sync while closed, so reminders then use the last synchronized events. Concurrent edits are checked before saving rather than silently overwriting someone else's changes.
 
-### Local data and privacy
+### Original data and privacy
 
-Original tasks and events remain in app-private SQLite. Without connecting a shared list, the app works locally. Shared list content is uploaded to your configured Supabase project and is accessible to its members and project administrators. Access and refresh tokens are encrypted with Android Keystore; account/project/list caches are isolated. There is no analytics. Android cloud backup and device transfer remain disabled. Uninstalling the app deletes local data and unsynced state.
+Original local tasks and events remain in app-private SQLite until explicitly imported through **Shared list → Import original local data**. The original database and shared cache remain separate. Sign-in is required before the planner interface opens.
+
+Shared content is uploaded to the configured Supabase project and is accessible to the shared account and project administrators. The APK contains a public project key, not a database administrator password or privileged API key. Access and refresh tokens are encrypted with Android Keystore. There is no analytics. Android cloud backup and device transfer remain disabled. Install updates over the existing app; uninstalling deletes local data and unsynced state.
 
 The interface is entirely in English. Android 8.0 (API 26) or later is supported.

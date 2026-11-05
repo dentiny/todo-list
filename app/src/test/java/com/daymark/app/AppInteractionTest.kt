@@ -17,7 +17,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.LooperMode
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35], qualifiers = "w411dp-h891dp")
+@Config(application = UiTestApplication::class, sdk = [35], qualifiers = "w411dp-h891dp")
 @LooperMode(LooperMode.Mode.PAUSED)
 class AppInteractionTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
@@ -32,6 +32,10 @@ class AppInteractionTest {
         val app = uiApp()
         val model = ViewModelProvider(compose.activity)[DaymarkViewModel::class.java]
         compose.runOnIdle {
+            (app as UiTestApplication).server.let { server ->
+                server.allTasks().forEach { server.deleteTask(it.id) }
+                server.events().forEach { server.deleteEvent(it.id) }
+            }
             app.store.allTasks().forEach { app.store.deleteTask(it.id) }
             app.store.events().forEach { app.scheduler.delete(it.id) }
             model.refresh()
@@ -141,10 +145,11 @@ class AppInteractionTest {
         assertTrue(compose.runOnIdle { app.store.allTasks().isEmpty() })
     }
     @Test fun `overdue P1 and P2 appear in today without a carry-over review`() {
-        val store = uiApp().store
+        val testApp = uiApp() as UiTestApplication
+        val store = testApp.store
         val today = java.time.LocalDate.now()
         compose.runOnIdle {
-            Priority.entries.forEach { store.addTask("Carry ${it.name}", it, today.minusDays(2)) }
+            Priority.entries.forEach { testApp.server.addTask("Carry ${it.name}", it, today.minusDays(2)) }
             ViewModelProvider(compose.activity)[DaymarkViewModel::class.java].refresh()
         }
         compose.waitUntil(10_000) {
@@ -161,23 +166,11 @@ class AppInteractionTest {
         compose.onNodeWithText("Move to today").assertDoesNotExist()
     }
 
-    @Test fun `shared list setup rejects a secret key before making network requests`() {
-        compose.onNodeWithText("Shared lists").performClick()
-        compose.onNode(hasSetTextAction() and hasText("Supabase project URL")).performTextReplacement("https://example.supabase.co")
-        compose.onNode(hasSetTextAction() and hasText("Publishable / anon key")).performTextReplacement("sb_secret_do_not_use")
-        compose.onNodeWithText("Save project").performScrollTo().performClick()
-        compose.waitUntil(10_000) {
-            compose.onAllNodesWithText("Use a publishable key or legacy anon key. Never enter a secret or service_role key.").fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onNodeWithText("Use a publishable key or legacy anon key. Never enter a secret or service_role key.").assertExists()
-        assertFalse(uiApp().cloud.signedIn)
-    }
-
     @Test fun `switching lists closes an editor even when entry IDs match`() {
         val app = uiApp()
         val model = ViewModelProvider(compose.activity)[DaymarkViewModel::class.java]
         compose.runOnIdle {
-            app.store.addTask("Original list entry",Priority.P0,java.time.LocalDate.now())
+            (app as UiTestApplication).server.addTask("Original list entry",Priority.P0,java.time.LocalDate.now())
             model.refresh()
         }
         compose.waitUntil(10_000) { compose.onAllNodesWithText("Original list entry").fetchSemanticsNodes().isNotEmpty() }
@@ -190,6 +183,23 @@ class AppInteractionTest {
         }
         compose.onNodeWithText("Make it yours.").assertDoesNotExist()
         assertEquals("Original list entry",compose.runOnIdle { app.store.allTasks().single().title })
+    }
+
+    @Test fun `home refresh button loads a task saved by another device`() {
+        val server = (uiApp() as UiTestApplication).server
+        compose.runOnIdle { server.addTask("Friend added this",Priority.P1,java.time.LocalDate.now()) }
+        compose.onNodeWithText("Friend added this").assertDoesNotExist()
+        compose.onNodeWithText("Refresh").performClick()
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("Friend added this").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Friend added this").assertExists()
+    }
+    @Test fun `pulling down the home list loads a task saved by another device`() {
+        val server = (uiApp() as UiTestApplication).server
+        compose.runOnIdle { server.addTask("Pull to see this",Priority.P0,java.time.LocalDate.now()) }
+        compose.onNodeWithText("Pull to see this").assertDoesNotExist()
+        compose.onNodeWithTag("day-list").performTouchInput { swipeDown(durationMillis = 600) }
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("Pull to see this").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Pull to see this").assertExists()
     }
 
 }

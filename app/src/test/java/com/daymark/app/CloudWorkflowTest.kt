@@ -78,7 +78,7 @@ class CloudWorkflowTest {
         })
         c.selectWorkspace(workspace)
         val model = DaymarkViewModel(app)
-        await { !model.state.value.loading && !ReflectionHelpers.getField<Boolean>(model,"refreshQueued") }
+        await { !model.state.value.loading && !model.state.value.refreshing }
         assertEquals("Shared original",model.state.value.tasks.single().title)
         model.refresh()
         await { entered.count==0L }
@@ -92,7 +92,7 @@ class CloudWorkflowTest {
         app.localStore.saveEvent(Event(title="Existing event", start=LocalDateTime.now().plusDays(2).withSecond(0).withNano(0)))
         client(CloudTransport { _, _, _, _ -> throw CloudFailure(400,"Could not create list") })
         val model=DaymarkViewModel(app)
-        await { !model.state.value.loading && !ReflectionHelpers.getField<Boolean>(model,"refreshQueued") }
+        await { !model.state.value.loading && !model.state.value.refreshing }
         assertEquals(3,alarms.size)
         model.createWorkspace("New list")
         await { !model.state.value.cloud.busy }
@@ -109,4 +109,29 @@ class CloudWorkflowTest {
         old.refresh()
         assertTrue(alarms.all { shadowOf(it.operation).savedIntent.getStringExtra("store_id")==currentId })
     }
+    @Test fun `offline refresh clears progress and coalesces repeated refresh requests`() {
+        val calls = AtomicInteger()
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val c = client(CloudTransport { _, _, _, _ ->
+            if (calls.incrementAndGet()>1) {
+                entered.countDown()
+                check(release.await(10,TimeUnit.SECONDS))
+                throw java.io.IOException("offline")
+            }
+            JSONObject().put("revision",1).put("tasks",JSONArray()).put("events",JSONArray()).toString()
+        })
+        c.selectWorkspace(workspace)
+        val model=DaymarkViewModel(app)
+        await { !model.state.value.refreshing && !model.state.value.loading }
+        model.refresh()
+        await { entered.count==0L }
+        assertTrue(model.state.value.refreshing)
+        repeat(5) { model.refresh() }
+        release.countDown()
+        await { !model.state.value.refreshing }
+        assertEquals(2,calls.get())
+        assertEquals("Sync unavailable · showing saved data",model.state.value.cloud.syncStatus)
+    }
+
 }
